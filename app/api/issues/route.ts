@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
   const offsetParam = searchParams.get("offset");
   const projectId = searchParams.get("project_id") ?? undefined;
   const statusId = searchParams.get("status_id") ?? undefined;
+  const sort = searchParams.get("sort") ?? undefined;
 
   const limit = limitParam && /^\d+$/.test(limitParam) ? Number(limitParam) : undefined;
   const offset = offsetParam && /^\d+$/.test(offsetParam) ? Number(offsetParam) : undefined;
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
   try {
     const result = await getIssues(
       { redmineUrl, apiKey },
-      { limit, offset, projectId, statusId },
+      { limit, offset, projectId, statusId, sort },
     );
     return Response.json(result);
   } catch (err) {
