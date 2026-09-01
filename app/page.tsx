@@ -3,6 +3,53 @@
 import { useState, type FormEvent } from "react";
 import type { RedmineIssueResponse } from "@/lib/redmine";
 
+/**
+ * APIキーが用意できない環境でも画面の表示ロジックを確認できるようにするための
+ * ハードコードされたダミーデータ。ネットワーク通信は一切行わない。
+ */
+const SAMPLE_ISSUE_RESPONSE: RedmineIssueResponse = {
+  issue: {
+    id: 1234,
+    subject: "サンプルチケット：ログイン画面のレイアウト崩れ",
+    description:
+      "モバイル表示時にログインボタンがフッターと重なる。\n375px幅で再現します。",
+    project: { id: 1, name: "サンプルプロジェクト" },
+    tracker: { id: 1, name: "バグ" },
+    status: { id: 2, name: "進行中" },
+    priority: { id: 2, name: "通常" },
+    author: { id: 1, name: "山田 太郎" },
+    assigned_to: { id: 2, name: "鈴木 花子" },
+    created_on: "2026-08-20T09:00:00Z",
+    updated_on: "2026-08-28T03:30:00Z",
+    journals: [
+      {
+        id: 1,
+        notes: "再現手順を確認しました。対応します。",
+        created_on: "2026-08-21T01:15:00Z",
+        user: { id: 2, name: "鈴木 花子" },
+      },
+      {
+        id: 2,
+        notes: "",
+        created_on: "2026-08-24T06:40:00Z",
+        user: { id: 2, name: "鈴木 花子" },
+      },
+      {
+        id: 3,
+        notes: "修正版をステージングにデプロイしました。確認をお願いします。",
+        created_on: "2026-08-27T08:05:00Z",
+        user: { id: 2, name: "鈴木 花子" },
+      },
+      {
+        id: 4,
+        notes: "確認しました、問題なさそうです。",
+        created_on: "2026-08-28T03:30:00Z",
+        user: { id: 1, name: "山田 太郎" },
+      },
+    ],
+  },
+};
+
 export default function Home() {
   const [redmineUrl, setRedmineUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -10,6 +57,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RedmineIssueResponse | null>(null);
+  const [isSample, setIsSample] = useState(false);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -18,6 +66,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setData(null);
+    setIsSample(false);
 
     try {
       const res = await fetch(`/api/issue/${encodeURIComponent(ticketId)}`, {
@@ -39,6 +88,12 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleShowSample() {
+    setError(null);
+    setData(SAMPLE_ISSUE_RESPONSE);
+    setIsSample(true);
   }
 
   const issue = data?.issue;
@@ -92,6 +147,25 @@ export default function Home() {
             入力値はこの画面を離れる（再読み込み・タブを閉じる）と消えます。保存はされません。
           </p>
         </form>
+
+        <div>
+          <button
+            type="button"
+            onClick={handleShowSample}
+            className="rounded border border-black/[.15] px-4 py-2 text-sm text-black dark:border-white/[.2] dark:text-zinc-50"
+          >
+            サンプルデータで試す
+          </button>
+          <p className="mt-1 text-xs text-zinc-500">
+            APIキーがまだ用意できない場合、実際のRedmineには接続せずダミーデータで画面表示を確認できます。
+          </p>
+        </div>
+
+        {isSample && data && (
+          <p className="rounded border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            これはサンプルデータです。実際のRedmineには接続していません。
+          </p>
+        )}
 
         {error && (
           <p className="whitespace-pre-wrap rounded border border-red-400 bg-red-50 px-3 py-2 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">

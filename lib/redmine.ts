@@ -1,6 +1,8 @@
 import "server-only";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 
 /**
  * Redmine REST API との疎通確認用の最小クライアント。
@@ -92,8 +94,12 @@ function isDisallowedIp(ip: string): boolean {
 /**
  * SSRF 対策: 接続先がプライベート/ループバック/リンクローカルアドレスでないことを検証する。
  * ホスト名は DNS 解決した実 IP で判定するため、社内ホスト名を騙った迂回も防ぐ。
+ * 検証に使った IP をそのまま返し、実接続でホスト名を再解決させない
+ * （再解決すると、検証後に DNS 応答を変える DNS リバインディングで迂回されうる）。
  */
-async function assertSafeRedmineUrl(rawUrl: string): Promise<URL> {
+async function assertSafeRedmineUrl(
+  rawUrl: string,
+): Promise<{ parsed: URL; address: string }> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -121,7 +127,71 @@ async function assertSafeRedmineUrl(rawUrl: string): Promise<URL> {
     );
   }
 
-  return parsed;
+  return { parsed, address: addresses[0] };
+}
+
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 15000;
+
+interface PinnedResponse {
+  status: number;
+  body: string;
+}
+
+/**
+ * assertSafeRedmineUrl で検証済みの IP アドレスに直接接続する。
+ * ホスト名の再解決を一切行わないことで DNS リバインディングを防ぐ。
+ * TLS 検証（SNI・証明書のホスト名照合）は本来のホスト名に対して行われるため、
+ * 接続先を偽装される心配はない。
+ */
+function pinnedRequest(
+  target: URL,
+  address: string,
+  headers: Record<string, string>,
+): Promise<PinnedResponse> {
+  return new Promise((resolve, reject) => {
+    const isHttps = target.protocol === "https:";
+    const requestFn = isHttps ? httpsRequest : httpRequest;
+    const port = target.port ? Number(target.port) : isHttps ? 443 : 80;
+
+    const req = requestFn(
+      {
+        hostname: address,
+        port,
+        path: `${target.pathname}${target.search}`,
+        method: "GET",
+        headers: { ...headers, Host: target.host },
+        timeout: REQUEST_TIMEOUT_MS,
+        ...(isHttps ? { servername: target.hostname } : {}),
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let total = 0;
+
+        res.on("data", (chunk: Buffer) => {
+          total += chunk.length;
+          if (total > MAX_RESPONSE_BYTES) {
+            req.destroy(new Error("Redmine からの応答が大きすぎます"));
+            return;
+          }
+          chunks.push(chunk);
+        });
+
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf-8"),
+          });
+        });
+      },
+    );
+
+    req.on("timeout", () => {
+      req.destroy(new Error("Redmine への接続がタイムアウトしました"));
+    });
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 /** チケット1件を journals 込みで取得する。 */
@@ -129,23 +199,19 @@ export async function getIssue(
   id: string,
   { redmineUrl, apiKey }: RedmineConnection,
 ): Promise<RedmineIssueResponse> {
-  const parsed = await assertSafeRedmineUrl(redmineUrl);
-  const base = `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
-  const url = `${base}/issues/${id}.json?include=journals`;
+  const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
+  const target = new URL(
+    `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}/issues/${id}.json?include=journals`,
+  );
 
-  const res = await fetch(url, {
-    headers: {
-      "X-Redmine-API-Key": apiKey,
-      Accept: "application/json",
-    },
-    cache: "no-store",
-    redirect: "manual",
+  const res = await pinnedRequest(target, address, {
+    "X-Redmine-API-Key": apiKey,
+    Accept: "application/json",
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new RedmineApiError(res.status, body);
+  if (res.status < 200 || res.status >= 300) {
+    throw new RedmineApiError(res.status, res.body);
   }
 
-  return (await res.json()) as RedmineIssueResponse;
+  return JSON.parse(res.body) as RedmineIssueResponse;
 }
