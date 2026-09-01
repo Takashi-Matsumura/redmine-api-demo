@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import type { RedmineIssueResponse } from "@/lib/redmine";
+import type {
+  RedmineIssueListResponse,
+  RedmineIssueResponse,
+} from "@/lib/redmine";
 
 /**
  * APIキーが用意できない環境でも画面の表示ロジックを確認できるようにするための
@@ -59,9 +62,14 @@ export default function Home() {
   const [data, setData] = useState<RedmineIssueResponse | null>(null);
   const [isSample, setIsSample] = useState(false);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!redmineUrl || !apiKey || !ticketId) return;
+  const [issueList, setIssueList] = useState<RedmineIssueListResponse | null>(
+    null,
+  );
+  const [issueListLoading, setIssueListLoading] = useState(false);
+  const [issueListError, setIssueListError] = useState<string | null>(null);
+
+  async function fetchIssue(id: string) {
+    if (!redmineUrl || !apiKey || !id) return;
 
     setLoading(true);
     setError(null);
@@ -69,7 +77,7 @@ export default function Home() {
     setIsSample(false);
 
     try {
-      const res = await fetch(`/api/issue/${encodeURIComponent(ticketId)}`, {
+      const res = await fetch(`/api/issue/${encodeURIComponent(id)}`, {
         headers: {
           "X-Redmine-Url": redmineUrl,
           "X-Redmine-Api-Key": apiKey,
@@ -88,6 +96,47 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    await fetchIssue(ticketId);
+  }
+
+  async function handleFetchIssueList() {
+    if (!redmineUrl || !apiKey) return;
+
+    setIssueListLoading(true);
+    setIssueListError(null);
+    setIssueList(null);
+
+    try {
+      const res = await fetch("/api/issues?limit=25", {
+        headers: {
+          "X-Redmine-Url": redmineUrl,
+          "X-Redmine-Api-Key": apiKey,
+        },
+      });
+      const body = await res.json();
+
+      if (!res.ok) {
+        setIssueListError(body.error ?? `取得に失敗しました（HTTP ${res.status}）`);
+        return;
+      }
+
+      setIssueList(body as RedmineIssueListResponse);
+    } catch (err) {
+      setIssueListError(
+        err instanceof Error ? err.message : "不明なエラーが発生しました",
+      );
+    } finally {
+      setIssueListLoading(false);
+    }
+  }
+
+  async function handleSelectIssue(id: number) {
+    setTicketId(String(id));
+    await fetchIssue(String(id));
   }
 
   function handleShowSample() {
@@ -159,6 +208,55 @@ export default function Home() {
           <p className="mt-1 text-xs text-zinc-500">
             APIキーがまだ用意できない場合、実際のRedmineには接続せずダミーデータで画面表示を確認できます。
           </p>
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-black/[.1] pt-6 dark:border-white/[.15]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-black dark:text-zinc-50">
+              チケット一覧
+            </h2>
+            <button
+              type="button"
+              onClick={handleFetchIssueList}
+              disabled={issueListLoading || !redmineUrl || !apiKey}
+              className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
+            >
+              {issueListLoading ? "取得中..." : "一覧を取得（最新25件）"}
+            </button>
+          </div>
+
+          {issueListError && (
+            <p className="whitespace-pre-wrap rounded border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+              {issueListError}
+            </p>
+          )}
+
+          {issueList && (
+            <>
+              <p className="text-xs text-zinc-500">
+                {issueList.total_count}件中 {issueList.offset + 1}〜
+                {issueList.offset + issueList.issues.length}件を表示
+              </p>
+              <ul className="flex flex-col divide-y divide-black/[.08] rounded border border-black/[.1] dark:divide-white/[.1] dark:border-white/[.15]">
+                {issueList.issues.map((i) => (
+                  <li key={i.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectIssue(i.id)}
+                      className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-black/[.03] dark:hover:bg-white/[.06]"
+                    >
+                      <span className="text-black dark:text-zinc-50">
+                        #{i.id} {i.subject}
+                      </span>
+                      <span className="text-xs text-zinc-500">
+                        {i.project.name} / {i.tracker.name} / {i.status.name}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
 
         {isSample && data && (
