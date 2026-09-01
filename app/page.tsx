@@ -1,68 +1,170 @@
-import Image from "next/image";
+"use client";
+
+import { useState, type FormEvent } from "react";
+import type { RedmineIssueResponse } from "@/lib/redmine";
 
 export default function Home() {
+  const [redmineUrl, setRedmineUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [ticketId, setTicketId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<RedmineIssueResponse | null>(null);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!redmineUrl || !apiKey || !ticketId) return;
+
+    setLoading(true);
+    setError(null);
+    setData(null);
+
+    try {
+      const res = await fetch(`/api/issue/${encodeURIComponent(ticketId)}`, {
+        headers: {
+          "X-Redmine-Url": redmineUrl,
+          "X-Redmine-Api-Key": apiKey,
+        },
+      });
+      const body = await res.json();
+
+      if (!res.ok) {
+        setError(body.error ?? `取得に失敗しました（HTTP ${res.status}）`);
+        return;
+      }
+
+      setData(body as RedmineIssueResponse);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "不明なエラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const issue = data?.issue;
+  const journals = issue?.journals ?? [];
+  const latestNotes = journals
+    .slice(-3)
+    .reverse()
+    .filter((j) => j.notes);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+    <div className="flex flex-col flex-1 items-center bg-zinc-50 font-sans dark:bg-black">
+      <main className="flex w-full max-w-2xl flex-col gap-6 px-6 py-16">
+        <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
+          Redmine 疎通確認
+        </h1>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <input
+            type="url"
+            value={redmineUrl}
+            onChange={(e) => setRedmineUrl(e.target.value)}
+            placeholder="Redmine URL（例: https://my.redmine.jp/xxxxx）"
+            className="rounded border border-black/[.15] bg-white px-3 py-2 text-black dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
+          />
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="APIキー"
+            autoComplete="off"
+            className="rounded border border-black/[.15] bg-white px-3 py-2 text-black dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
+          />
+          <div className="flex gap-3">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={ticketId}
+              onChange={(e) => setTicketId(e.target.value)}
+              placeholder="チケットID（例: 1234）"
+              className="flex-1 rounded border border-black/[.15] bg-white px-3 py-2 text-black dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded bg-foreground px-4 py-2 text-background disabled:opacity-50"
+            >
+              {loading ? "取得中..." : "取得"}
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500">
+            入力値はこの画面を離れる（再読み込み・タブを閉じる）と消えます。保存はされません。
+          </p>
+        </form>
+
+        {error && (
+          <p className="whitespace-pre-wrap rounded border border-red-400 bg-red-50 px-3 py-2 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+            {error}
+          </p>
+        )}
+
+        {issue && (
+          <div className="flex flex-col gap-4">
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm text-black dark:text-zinc-50">
+              <dt className="font-medium text-zinc-500">id</dt>
+              <dd>{issue.id}</dd>
+              <dt className="font-medium text-zinc-500">subject</dt>
+              <dd>{issue.subject}</dd>
+              <dt className="font-medium text-zinc-500">project</dt>
+              <dd>{issue.project.name}</dd>
+              <dt className="font-medium text-zinc-500">tracker</dt>
+              <dd>{issue.tracker.name}</dd>
+              <dt className="font-medium text-zinc-500">status</dt>
+              <dd>{issue.status.name}</dd>
+              <dt className="font-medium text-zinc-500">priority</dt>
+              <dd>{issue.priority.name}</dd>
+              <dt className="font-medium text-zinc-500">author</dt>
+              <dd>{issue.author.name}</dd>
+              <dt className="font-medium text-zinc-500">assigned_to</dt>
+              <dd>{issue.assigned_to?.name ?? "未割当"}</dd>
+              <dt className="font-medium text-zinc-500">created_on</dt>
+              <dd>{issue.created_on}</dd>
+              <dt className="font-medium text-zinc-500">updated_on</dt>
+              <dd>{issue.updated_on}</dd>
+            </dl>
+
+            <div>
+              <p className="text-sm font-medium text-zinc-500">description</p>
+              <p className="whitespace-pre-wrap text-sm text-black dark:text-zinc-50">
+                {issue.description || "(なし)"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm font-medium text-zinc-500">
+                journals（{journals.length}件）の最新3件の notes
+              </p>
+              {latestNotes.length === 0 ? (
+                <p className="text-sm text-zinc-500">(notes 付きの履歴なし)</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {latestNotes.map((j) => (
+                    <li
+                      key={j.id}
+                      className="whitespace-pre-wrap rounded border border-black/[.1] px-3 py-2 text-sm text-black dark:border-white/[.15] dark:text-zinc-50"
+                    >
+                      <span className="text-zinc-500">
+                        {j.created_on} / {j.user?.name ?? "unknown"}
+                      </span>
+                      <br />
+                      {j.notes}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <details>
+              <summary className="cursor-pointer text-sm text-zinc-500">
+                生JSONレスポンス
+              </summary>
+              <pre className="mt-2 max-h-96 overflow-auto rounded bg-black/[.04] p-3 text-xs text-black dark:bg-white/[.06] dark:text-zinc-50">
+                {JSON.stringify(data, null, 2)}
+              </pre>
+            </details>
+          </div>
+        )}
       </main>
     </div>
   );
