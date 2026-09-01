@@ -225,6 +225,12 @@ export default function Home() {
             </button>
           </div>
 
+          {(!redmineUrl || !apiKey) && (
+            <p className="text-xs text-zinc-500">
+              上のRedmine URLとAPIキーを入力すると一覧を取得できます。
+            </p>
+          )}
+
           {issueListError && (
             <p className="whitespace-pre-wrap rounded border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
               {issueListError}
