@@ -40,6 +40,24 @@ export interface RedmineIssueResponse {
   issue: RedmineIssue;
 }
 
+/** 一覧に含まれるチケット。journals は一覧取得時には含まれない。 */
+export type RedmineIssueSummary = Omit<RedmineIssue, "journals">;
+
+export interface RedmineIssueListResponse {
+  issues: RedmineIssueSummary[];
+  total_count: number;
+  offset: number;
+  limit: number;
+}
+
+/** 一覧取得時のフィルタ・ページング条件。 */
+export interface RedmineIssueListParams {
+  limit?: number;
+  offset?: number;
+  projectId?: string;
+  statusId?: string;
+}
+
 /** Redmine からの非 2xx レスポンスをステータスコードと本文つきで表現するエラー。 */
 export class RedmineApiError extends Error {
   status: number;
@@ -214,4 +232,38 @@ export async function getIssue(
   }
 
   return JSON.parse(res.body) as RedmineIssueResponse;
+}
+
+const DEFAULT_ISSUE_LIST_LIMIT = 25;
+const MAX_ISSUE_LIST_LIMIT = 100;
+
+/** チケット一覧を取得する。 */
+export async function getIssues(
+  { redmineUrl, apiKey }: RedmineConnection,
+  { limit, offset, projectId, statusId }: RedmineIssueListParams = {},
+): Promise<RedmineIssueListResponse> {
+  const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
+  const target = new URL(
+    `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}/issues.json`,
+  );
+
+  const safeLimit = Math.min(
+    Math.max(1, limit ?? DEFAULT_ISSUE_LIST_LIMIT),
+    MAX_ISSUE_LIST_LIMIT,
+  );
+  target.searchParams.set("limit", String(safeLimit));
+  target.searchParams.set("offset", String(Math.max(0, offset ?? 0)));
+  if (projectId) target.searchParams.set("project_id", projectId);
+  if (statusId) target.searchParams.set("status_id", statusId);
+
+  const res = await pinnedRequest(target, address, {
+    "X-Redmine-API-Key": apiKey,
+    Accept: "application/json",
+  });
+
+  if (res.status < 200 || res.status >= 300) {
+    throw new RedmineApiError(res.status, res.body);
+  }
+
+  return JSON.parse(res.body) as RedmineIssueListResponse;
 }
