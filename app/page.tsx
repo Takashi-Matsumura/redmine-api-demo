@@ -221,7 +221,7 @@ export default function Home() {
               disabled={issueListLoading || !redmineUrl || !apiKey}
               className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
             >
-              {issueListLoading ? "取得中..." : "一覧を取得（最新25件）"}
+              {issueListLoading ? "取得中..." : "一覧を取得（最新25件を取得）"}
             </button>
           </div>
 
