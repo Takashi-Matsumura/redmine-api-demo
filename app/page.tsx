@@ -153,8 +153,8 @@ export default function Home() {
     .filter((j) => j.notes);
 
   return (
-    <div className="flex flex-col flex-1 items-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex w-full max-w-2xl flex-col gap-6 px-6 py-16">
+    <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black lg:flex-row lg:justify-center">
+      <main className="flex w-full max-w-2xl flex-col gap-6 px-6 py-16 lg:mx-auto">
         <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
           Redmine 疎通確認
         </h1>
@@ -344,6 +344,35 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      <aside className="w-full shrink-0 border-t border-black/[.1] px-6 py-16 dark:border-white/[.15] lg:w-96 lg:border-t-0 lg:border-l lg:pl-10">
+        <h2 className="text-lg font-semibold text-black dark:text-zinc-50">
+          実環境 検証手順
+        </h2>
+        <ol className="mt-4 flex list-decimal flex-col gap-4 pl-5 text-sm text-black dark:text-zinc-50">
+          <li>
+            上のRedmine URLとAPIキーを実環境の値で入力する。
+          </li>
+          <li>
+            「一覧を取得」をクリックし、実際のRedmine画面のチケット一覧と件数・並び順（最新順）が一致するか確認する。
+          </li>
+          <li>
+            一覧の行をクリックし、表示された詳細（ステータス・担当者・説明・journalsのnotes）が実際のRedmine画面と一致するか確認する。
+          </li>
+          <li>
+            チケットID欄に個別のIDを直接入力して「取得」し、同様に内容が一致するか確認する。
+          </li>
+          <li>
+            存在しないチケットIDや誤ったAPIキーを入力し、エラーメッセージが適切に表示されるか確認する。
+          </li>
+          <li>
+            「生JSONレスポンス」を開き、想定外のフィールドや欠落がないか確認する。
+          </li>
+        </ol>
+        <p className="mt-6 text-xs text-zinc-500">
+          この手順は画面表示用の固定テキストです。実環境のAPIキー等は送信・保存されません。
+        </p>
+      </aside>
     </div>
   );
 }
