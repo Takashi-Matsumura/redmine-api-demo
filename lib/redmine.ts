@@ -19,6 +19,8 @@ export interface RedmineJournal {
   notes?: string;
   created_on: string;
   user?: RedmineNamed;
+  /** true の場合、閲覧権限のある一部ユーザーのみに公開される注記。エクスポートでは除外する。 */
+  private_notes?: boolean;
 }
 
 export interface RedmineIssue {
@@ -60,6 +62,13 @@ export interface RedmineIssueListParams {
   /** 起票日（created_on）の範囲フィルタ。両方指定時のみ有効。YYYY-MM-DD形式。 */
   createdOnFrom?: string;
   createdOnTo?: string;
+  /**
+   * true の場合、クローズ済み（終了系）ステータスのみに絞る。
+   * createdOnFrom/createdOnTo と同じ f[]/op[]/v[] 形式で指定する必要がある。
+   * Redmine は params[:f] が存在すると status_id の短縮フィルタを無視するため、
+   * statusId と併用しても意図通りには絞り込めない。
+   */
+  closedOnly?: boolean;
 }
 
 /** Redmine からの非 2xx レスポンスをステータスコードと本文つきで表現するエラー。 */
@@ -260,6 +269,7 @@ export async function getIssues(
     sort,
     createdOnFrom,
     createdOnTo,
+    closedOnly,
   }: RedmineIssueListParams = {},
 ): Promise<RedmineIssueListResponse> {
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
@@ -275,12 +285,24 @@ export async function getIssues(
   target.searchParams.set("offset", String(Math.max(0, offset ?? 0)));
   target.searchParams.set("sort", sort || DEFAULT_ISSUE_LIST_SORT);
   if (projectId) target.searchParams.set("project_id", projectId);
-  target.searchParams.set("status_id", statusId || DEFAULT_ISSUE_LIST_STATUS);
+
+  const hasAdvancedFilter = Boolean(
+    (createdOnFrom && createdOnTo) || closedOnly,
+  );
+  // Redmine は f[] を1つでも渡すと status_id の短縮フィルタを無視するため、
+  // f[] を使うリクエストでは status_id を素通しせず f[] 形式に統一する。
+  if (!hasAdvancedFilter) {
+    target.searchParams.set("status_id", statusId || DEFAULT_ISSUE_LIST_STATUS);
+  }
   if (createdOnFrom && createdOnTo) {
     target.searchParams.append("f[]", "created_on");
     target.searchParams.set("op[created_on]", "><");
     target.searchParams.append("v[created_on][]", createdOnFrom);
     target.searchParams.append("v[created_on][]", createdOnTo);
+  }
+  if (closedOnly) {
+    target.searchParams.append("f[]", "status_id");
+    target.searchParams.set("op[status_id]", "c");
   }
 
   const res = await pinnedRequest(target, address, {
@@ -293,4 +315,95 @@ export async function getIssues(
   }
 
   return JSON.parse(res.body) as RedmineIssueListResponse;
+}
+
+const DEFAULT_MAX_EXPORT_ISSUES = 1000;
+
+/**
+ * 一覧を offset ページングしながら全件取得する。
+ * limit/offset は呼び出し側では指定しない（内部で MAX_ISSUE_LIST_LIMIT 固定・自動送り）。
+ */
+export async function getAllIssues(
+  conn: RedmineConnection,
+  params: Omit<RedmineIssueListParams, "limit" | "offset">,
+  opts?: { maxIssues?: number },
+): Promise<{
+  issues: RedmineIssueSummary[];
+  totalCount: number;
+  truncated: boolean;
+}> {
+  const maxIssues = opts?.maxIssues ?? DEFAULT_MAX_EXPORT_ISSUES;
+  const issues: RedmineIssueSummary[] = [];
+  let offset = 0;
+  let totalCount = Infinity;
+
+  while (offset < totalCount && issues.length < maxIssues) {
+    const page = await getIssues(conn, {
+      ...params,
+      limit: MAX_ISSUE_LIST_LIMIT,
+      offset,
+    });
+    totalCount = page.total_count;
+    issues.push(...page.issues);
+    if (page.issues.length === 0) break; // 想定外の空応答での無限ループ防止
+    offset += page.issues.length;
+  }
+
+  const truncated = issues.length < totalCount;
+  return { issues: issues.slice(0, maxIssues), totalCount, truncated };
+}
+
+const DEFAULT_DETAIL_CONCURRENCY = 4;
+
+/**
+ * 複数チケットの詳細（journals込み）を並行数を絞って取得する。
+ * 1件の失敗で全体を止めず、失敗は failures にまとめて返す。
+ * 4xx はリトライせず即失敗、それ以外のエラーは1回だけリトライする。
+ */
+export async function getIssuesDetailed(
+  conn: RedmineConnection,
+  ids: number[],
+  opts?: { concurrency?: number },
+): Promise<{
+  issues: RedmineIssue[];
+  failures: { id: number; message: string }[];
+}> {
+  const concurrency = Math.max(1, opts?.concurrency ?? DEFAULT_DETAIL_CONCURRENCY);
+  // ids の並び順を保つため、結果を位置固定のスロットに書き込む（workerの完了順は不定なため）。
+  const slots: (RedmineIssue | undefined)[] = new Array(ids.length);
+  const failures: { id: number; message: string }[] = [];
+
+  async function fetchOne(index: number): Promise<void> {
+    const id = ids[index];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await getIssue(String(id), conn);
+        slots[index] = res.issue;
+        return;
+      } catch (err) {
+        const isClientError = err instanceof RedmineApiError && err.status < 500;
+        if (isClientError || attempt === 1) {
+          const message = err instanceof Error ? err.message : "不明なエラー";
+          failures.push({ id, message });
+          return;
+        }
+      }
+    }
+  }
+
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < ids.length) {
+      const index = cursor;
+      cursor += 1;
+      await fetchOne(index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, ids.length) }, worker),
+  );
+
+  const issues = slots.filter((issue): issue is RedmineIssue => issue !== undefined);
+  return { issues, failures };
 }

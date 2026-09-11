@@ -6,27 +6,7 @@ import type {
   RedmineIssueListResponse,
   RedmineIssueResponse,
 } from "@/lib/redmine";
-
-/** 対象月（YYYY-MM）から、その月の初日・末日（YYYY-MM-DD）を求める。不正な形式なら null。 */
-function monthToDateRange(month: string): { from: string; to: string } | null {
-  const match = /^(\d{4})-(\d{2})$/.exec(month);
-  if (!match) return null;
-
-  const year = Number(match[1]);
-  const monthNum = Number(match[2]);
-  const lastDay = new Date(year, monthNum, 0).getDate();
-  const pad = (n: number) => String(n).padStart(2, "0");
-
-  return {
-    from: `${match[1]}-${match[2]}-01`,
-    to: `${match[1]}-${match[2]}-${pad(lastDay)}`,
-  };
-}
-
-function currentMonthValue(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
+import { monthToDateRange, currentMonthValue } from "@/lib/month";
 
 /** チケット詳細（ステータス・担当者・説明・journalsのnotes）の表示。詳細ダイアログで使う。 */
 function IssueDetailView({ issue }: { issue: RedmineIssue }) {
@@ -97,11 +77,15 @@ export default function Home() {
   const [apiKey, setApiKey] = useState("");
 
   const [targetMonth, setTargetMonth] = useState(currentMonthValue);
+  const [closedOnly, setClosedOnly] = useState(true);
   const [issueList, setIssueList] = useState<RedmineIssueListResponse | null>(
     null,
   );
   const [issueListLoading, setIssueListLoading] = useState(false);
   const [issueListError, setIssueListError] = useState<string | null>(null);
+
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const [modalIssue, setModalIssue] = useState<RedmineIssueResponse | null>(
     null,
@@ -128,6 +112,7 @@ export default function Home() {
         limit: "100",
         created_on_from: range.from,
         created_on_to: range.to,
+        closed_only: closedOnly ? "1" : "0",
       });
       const res = await fetch(`/api/issues?${params.toString()}`, {
         headers: {
@@ -149,6 +134,46 @@ export default function Home() {
       );
     } finally {
       setIssueListLoading(false);
+    }
+  }
+
+  async function handleExportMarkdown() {
+    if (!redmineUrl || !apiKey || !targetMonth) return;
+
+    setExportLoading(true);
+    setExportError(null);
+
+    try {
+      const params = new URLSearchParams({
+        month: targetMonth,
+        closed_only: closedOnly ? "1" : "0",
+      });
+      const res = await fetch(`/api/export?${params.toString()}`, {
+        headers: {
+          "X-Redmine-Url": redmineUrl,
+          "X-Redmine-Api-Key": apiKey,
+        },
+      });
+
+      if (!res.ok) {
+        const body = await res.json();
+        setExportError(body.error ?? `エクスポートに失敗しました（HTTP ${res.status}）`);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `redmine-${targetMonth}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(
+        err instanceof Error ? err.message : "不明なエラーが発生しました",
+      );
+    } finally {
+      setExportLoading(false);
     }
   }
 
@@ -213,7 +238,7 @@ export default function Home() {
             <h2 className="text-sm font-medium text-black dark:text-zinc-50">
               チケット一覧
             </h2>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input
                 type="month"
                 value={targetMonth}
@@ -228,8 +253,25 @@ export default function Home() {
               >
                 {issueListLoading ? "取得中..." : "一覧を取得"}
               </button>
+              <button
+                type="button"
+                onClick={handleExportMarkdown}
+                disabled={exportLoading || !redmineUrl || !apiKey || !targetMonth}
+                className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
+              >
+                {exportLoading ? "エクスポート中..." : "MDでエクスポート"}
+              </button>
             </div>
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-black dark:text-zinc-50">
+            <input
+              type="checkbox"
+              checked={closedOnly}
+              onChange={(e) => setClosedOnly(e.target.checked)}
+            />
+            完了（クローズ）済みのみ（一覧・エクスポート共通）
+          </label>
 
           {(!redmineUrl || !apiKey) && (
             <p className="text-xs text-zinc-500">
@@ -243,12 +285,18 @@ export default function Home() {
             </p>
           )}
 
+          {exportError && (
+            <p className="whitespace-pre-wrap rounded border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+              {exportError}
+            </p>
+          )}
+
           {issueList && (
             <>
               <p className="text-xs text-zinc-500">
                 {issueList.total_count}件中 {issueList.offset + 1}〜
                 {issueList.offset + issueList.issues.length}
-                件を表示（行をダブルクリックで詳細表示）
+                件を表示（行をダブルクリックで詳細表示。一覧の表示は先頭100件までですが、MDエクスポートは全件を含みます）
               </p>
               <ul className="flex flex-col divide-y divide-black/[.08] rounded border border-black/[.1] dark:divide-white/[.1] dark:border-white/[.15]">
                 {issueList.issues.map((i) => (
@@ -292,6 +340,15 @@ export default function Home() {
           </li>
           <li>
             ダイアログ内の「生JSONレスポンス」を開き、想定外のフィールドや欠落がないか確認する。
+          </li>
+          <li>
+            「完了（クローズ）済みのみ」をON/OFFして一覧の件数が変わることを確認し、ON時の件数が実際のRedmine画面で同条件（起票日がその月かつステータスが終了系）に絞った件数と一致するか確認する。
+          </li>
+          <li>
+            「MDでエクスポート」でダウンロードしたファイルの front matter の issue_count が、同条件で一覧取得した total_count と一致するか確認する（101件以上ある月は特に）。
+          </li>
+          <li>
+            エクスポートしたファイルを開き、front matter・チケットの区切り・見出し階層が崩れていないこと、プライベート注記が本文に含まれていないことを確認する。
           </li>
         </ol>
         <p className="mt-6 text-xs text-zinc-500">
