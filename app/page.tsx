@@ -226,7 +226,7 @@ export default function Home() {
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black lg:flex-row lg:justify-center">
       <main className="flex w-full max-w-2xl flex-col gap-6 px-6 py-16 lg:mx-auto">
         <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-          Redmine 疎通確認
+          Redmine チケット一覧・詳細確認
         </h1>
 
         <div className="flex flex-col gap-3">
