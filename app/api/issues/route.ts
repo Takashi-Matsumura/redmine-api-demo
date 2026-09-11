@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { getIssues, RedmineApiError, RedmineUrlValidationError } from "@/lib/redmine";
+import { getIssues } from "@/lib/redmine";
+import { redmineErrorResponse } from "@/lib/redmine-response";
 
 export async function GET(req: NextRequest) {
   const redmineUrl = req.headers.get("x-redmine-url")?.trim();
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
   const sort = searchParams.get("sort") ?? undefined;
   const createdOnFromParam = searchParams.get("created_on_from");
   const createdOnToParam = searchParams.get("created_on_to");
+  const closedOnly = searchParams.get("closed_only") === "1";
 
   const limit = limitParam && /^\d+$/.test(limitParam) ? Number(limitParam) : undefined;
   const offset = offsetParam && /^\d+$/.test(offsetParam) ? Number(offsetParam) : undefined;
@@ -32,33 +34,10 @@ export async function GET(req: NextRequest) {
   try {
     const result = await getIssues(
       { redmineUrl, apiKey },
-      { limit, offset, projectId, statusId, sort, createdOnFrom, createdOnTo },
+      { limit, offset, projectId, statusId, sort, createdOnFrom, createdOnTo, closedOnly },
     );
     return Response.json(result);
   } catch (err) {
-    if (err instanceof RedmineUrlValidationError) {
-      return Response.json({ error: err.message }, { status: 400 });
-    }
-
-    if (err instanceof RedmineApiError) {
-      const excerpt = err.body.slice(0, 500);
-      let message: string;
-      switch (err.status) {
-        case 401:
-        case 403:
-          message = `Redmine への認証に失敗しました（HTTP ${err.status}）。REST API が無効化されているか、APIキーが不正な可能性があります。`;
-          break;
-        default:
-          message = `Redmine からエラー応答がありました（HTTP ${err.status}）。接続元IP制限やネットワークの問題の可能性があります。`;
-      }
-      return Response.json(
-        { error: message, status: err.status, body: excerpt },
-        { status: err.status },
-      );
-    }
-
-    console.error("Redmine issue list fetch failed:", err);
-    const message = err instanceof Error ? err.message : "不明なエラーが発生しました";
-    return Response.json({ error: message }, { status: 500 });
+    return redmineErrorResponse(err, "Redmine issue list fetch failed");
   }
 }
