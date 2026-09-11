@@ -18,14 +18,21 @@ export async function GET(req: NextRequest) {
   const projectId = searchParams.get("project_id") ?? undefined;
   const statusId = searchParams.get("status_id") ?? undefined;
   const sort = searchParams.get("sort") ?? undefined;
+  const createdOnFromParam = searchParams.get("created_on_from");
+  const createdOnToParam = searchParams.get("created_on_to");
 
   const limit = limitParam && /^\d+$/.test(limitParam) ? Number(limitParam) : undefined;
   const offset = offsetParam && /^\d+$/.test(offsetParam) ? Number(offsetParam) : undefined;
 
+  const isValidDate = (v: string | null): v is string =>
+    !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const createdOnFrom = isValidDate(createdOnFromParam) ? createdOnFromParam : undefined;
+  const createdOnTo = isValidDate(createdOnToParam) ? createdOnToParam : undefined;
+
   try {
     const result = await getIssues(
       { redmineUrl, apiKey },
-      { limit, offset, projectId, statusId, sort },
+      { limit, offset, projectId, statusId, sort, createdOnFrom, createdOnTo },
     );
     return Response.json(result);
   } catch (err) {

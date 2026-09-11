@@ -57,6 +57,9 @@ export interface RedmineIssueListParams {
   projectId?: string;
   statusId?: string;
   sort?: string;
+  /** 起票日（created_on）の範囲フィルタ。両方指定時のみ有効。YYYY-MM-DD形式。 */
+  createdOnFrom?: string;
+  createdOnTo?: string;
 }
 
 /** Redmine からの非 2xx レスポンスをステータスコードと本文つきで表現するエラー。 */
@@ -239,11 +242,25 @@ const DEFAULT_ISSUE_LIST_LIMIT = 25;
 const MAX_ISSUE_LIST_LIMIT = 100;
 /** 未指定時のデフォルト並び順。id降順（作成が新しい順）で「最新」を保証する。 */
 const DEFAULT_ISSUE_LIST_SORT = "id:desc";
+/**
+ * 未指定時のデフォルトステータス。
+ * Redmine の issues.json は status_id を省略すると「未完了」のみを返すため、
+ * 完了済みチケットも含めた全件を返すよう明示的に指定する。
+ */
+const DEFAULT_ISSUE_LIST_STATUS = "*";
 
 /** チケット一覧を取得する。 */
 export async function getIssues(
   { redmineUrl, apiKey }: RedmineConnection,
-  { limit, offset, projectId, statusId, sort }: RedmineIssueListParams = {},
+  {
+    limit,
+    offset,
+    projectId,
+    statusId,
+    sort,
+    createdOnFrom,
+    createdOnTo,
+  }: RedmineIssueListParams = {},
 ): Promise<RedmineIssueListResponse> {
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
   const target = new URL(
@@ -258,7 +275,13 @@ export async function getIssues(
   target.searchParams.set("offset", String(Math.max(0, offset ?? 0)));
   target.searchParams.set("sort", sort || DEFAULT_ISSUE_LIST_SORT);
   if (projectId) target.searchParams.set("project_id", projectId);
-  if (statusId) target.searchParams.set("status_id", statusId);
+  target.searchParams.set("status_id", statusId || DEFAULT_ISSUE_LIST_STATUS);
+  if (createdOnFrom && createdOnTo) {
+    target.searchParams.append("f[]", "created_on");
+    target.searchParams.set("op[created_on]", "><");
+    target.searchParams.append("v[created_on][]", createdOnFrom);
+    target.searchParams.append("v[created_on][]", createdOnTo);
+  }
 
   const res = await pinnedRequest(target, address, {
     "X-Redmine-API-Key": apiKey,
