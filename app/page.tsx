@@ -31,10 +31,7 @@ function currentMonthValue(): string {
 /** チケット詳細（ステータス・担当者・説明・journalsのnotes）の表示。詳細ダイアログで使う。 */
 function IssueDetailView({ issue }: { issue: RedmineIssue }) {
   const journals = issue.journals ?? [];
-  const latestNotes = journals
-    .slice(-3)
-    .reverse()
-    .filter((j) => j.notes);
+  const notes = journals.filter((j) => j.notes);
 
   return (
     <div className="flex flex-col gap-4">
@@ -70,13 +67,13 @@ function IssueDetailView({ issue }: { issue: RedmineIssue }) {
 
       <div>
         <p className="text-sm font-medium text-zinc-500">
-          journals（{journals.length}件）の最新3件の notes
+          journals（{journals.length}件）のnotes（コメント）全{notes.length}件
         </p>
-        {latestNotes.length === 0 ? (
+        {notes.length === 0 ? (
           <p className="text-sm text-zinc-500">(notes 付きの履歴なし)</p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {latestNotes.map((j) => (
+            {notes.map((j) => (
               <li
                 key={j.id}
                 className="whitespace-pre-wrap rounded border border-black/[.1] px-3 py-2 text-sm text-black dark:border-white/[.15] dark:text-zinc-50"
