@@ -1,6 +1,6 @@
 # redmine-api-demo
 
-Redmine REST API への疎通確認用の最小構成アプリ。対象月を指定してチケット一覧を取得し、一覧の行をダブルクリックするとチケット1件の内容（コメント履歴を含む）をダイアログで確認できる検証ツール。DB・キャッシュ層、認証機能は持たない。
+Redmine REST API から対象月のチケット一覧・詳細（コメント履歴を含む）を確認できる検証ツール。あわせて、対象月の全チケットを1つのMarkdownファイルとしてエクスポートする機能を持つ。8年分蓄積されたRedmineのチケットをナレッジとして書き出し、GitHub Copilot等に読み込ませる用途を想定している。DB・キャッシュ層、認証機能は持たない。
 
 ## 使い方
 
@@ -15,11 +15,25 @@ npm run dev
 - **Redmine URL**: 接続先 Redmine のベースURL（例: `https://my.redmine.jp/xxxxx`）
 - **APIキー**: Redmine の「個人設定」画面右側に表示されるAPIアクセスキー
 
-入力後、「チケット一覧」で対象月（例: 2026年8月）を選び「一覧を取得」を押すと、その月に起票された全ステータス（完了済みも含む）のチケットが一覧表示される（最大100件、`sort=id:desc` で新しい順）。
+### チケット一覧
+
+「チケット一覧」で対象月（例: 2026年8月）を選び「一覧を取得」を押すと、その月に**起票された**チケットが一覧表示される（`sort=id:desc` で新しい順）。「完了（クローズ）済みのみ」チェックボックス（既定ON）で、終了系ステータスのみに絞り込める。
+
+一覧は1ページ100件で、100件を超える場合は「前へ」「次へ」でページ送りできる（総ページ数を表示）。
 
 一覧の行を**ダブルクリック**すると、そのチケットの詳細がダイアログで表示される。ダイアログには `id` / `subject` / `project.name` / `tracker.name` / `status.name` / `priority.name` / `author.name` / `assigned_to.name` / `created_on` / `updated_on` / `description` に加え、journals（履歴）のうち notes（コメント）を持つものが**全件**時系列順で表示される。デバッグ用に生のJSONレスポンスをダイアログ内の `<details>` に表示する。ダイアログは「閉じる」ボタンまたは Esc キーで閉じられる。
 
-失敗時は原因の見当がつくメッセージを画面にそのまま表示する。
+### Markdownエクスポート
+
+「MDでエクスポート」を押すと、対象月の条件（起票日の範囲、「完了済みのみ」チェックボックスの状態）に合致する**全チケット**（一覧のページ数に関わらず全件）を1つのMarkdownファイル（`redmine-YYYY-MM.md`）としてダウンロードする。
+
+- 各チケットは見出し・メタ情報（プロジェクト/トラッカー/ステータス/優先度/起票者/担当者/日付）・説明・コメント（journalsのnotes）で構成される
+- プライベート注記（`private_notes: true` のjournal）は本文に含めず、除外件数のみ front matter の `excluded_private_notes` に記録する
+- 本文中の見出し記法（`#`〜`######`）や単独行の `---`/`===` はエスケープし、連結後のチケット区切り・見出し階層を壊さないようにしている
+- 一覧取得はRedmineの `limit` 上限（100件）に従い自動でページングして全件取得する。チケット詳細（journals込み）の取得は並行数4で行い、一部失敗しても残りは出力する（失敗分は front matter の `failed_issue_count` と本文末尾の「取得に失敗したチケット」に記録）
+- 安全のため1回のエクスポートで取得するチケット数には上限（既定1000件）があり、超過時は `truncated: true` として実際の取得件数を front matter に記録する
+
+失敗時（一覧取得・詳細取得・エクスポートいずれも）は原因の見当がつくメッセージを画面にそのまま表示する。
 
 - **401 / 403**: REST API が未有効化、またはAPIキーが不正
 - **404**: チケットが存在しない、または閲覧権限がない
@@ -29,10 +43,18 @@ npm run dev
 
 ## 構成
 
-- `app/page.tsx`: 確認用画面（Client Component）。入力フォーム・一覧表示・詳細ダイアログ
-- `app/api/issues/route.ts`: Route Handler。チケット一覧を取得する。`status_id` 未指定時は全ステータス（`*`）を対象にし、対象月の範囲は `created_on_from`/`created_on_to` パラメータで受け取り Redmine の拡張フィルタ（`f[]=created_on&op[created_on]=><`）に変換する
+- `app/page.tsx`: 確認用画面（Client Component）。入力フォーム・一覧表示（ページネーション）・詳細ダイアログ・エクスポートボタン
+- `app/api/issues/route.ts`: Route Handler。チケット一覧を取得する。対象月の範囲は `created_on_from`/`created_on_to` パラメータで受け取り Redmine の拡張フィルタ（`f[]=created_on&op[created_on]=><`）に変換する。`closed_only=1` で終了系ステータスに絞り込む（`f[]=status_id&op[status_id]=c`）
 - `app/api/issue/[id]/route.ts`: Route Handler。チケット1件を journals 込みで取得する
-- `lib/redmine.ts`: Redmine REST API クライアント（`import "server-only"`）。`getIssues()` / `getIssue()` を実装
+- `app/api/export/route.ts`: Route Handler。対象月の全チケットを取得し、Markdownとして返す（`Content-Disposition: attachment`）
+- `lib/redmine.ts`: Redmine REST API クライアント（`import "server-only"`）。`getIssues()` / `getIssue()` に加え、全件ページング取得の `getAllIssues()`、チケット詳細の並行取得（失敗を個別集計）を行う `getIssuesDetailed()` を実装
+- `lib/markdown.ts`: チケット配列をMarkdown文字列に変換する純粋関数（`issuesToMarkdown()`）
+- `lib/month.ts`: 対象月（`YYYY-MM`）から日付範囲・当月値を求めるヘルパ（クライアント/サーバ両方から利用するため `lib/redmine.ts` から分離）
+- `lib/redmine-response.ts`: 3つのRoute Handlerで共通のRedmineエラー→JSONレスポンス変換
+
+### Redmineのフィルタ仕様に関する注意
+
+Redmine は `issues.json` のクエリに `f[]`（拡張フィルタ）を1つでも含めると、`status_id=` のような短縮フィルタを無視する。そのため「完了済みのみ」は `status_id` ではなく `f[]=status_id&op[status_id]=c`（`c` はクローズ演算子）として渡している（`lib/redmine.ts` の `getIssues()`）。実環境での挙動確認が必要な場合は、Redmine画面で同条件に絞った件数と一覧・エクスポートの件数を突合すること。
 
 ## セキュリティ上の注意
 
