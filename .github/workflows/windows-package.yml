@@ -114,9 +114,15 @@ jobs:
             サーバー側にも保存されません。画面を閉じる・再読み込みすると入力値は消えます。
           TXT
 
+      - name: Create zip archive
+        run: |
+          set -eu
+          cd package
+          zip -q -r ../redmine-api-demo-win.zip redmine-api-demo-win
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: redmine-api-demo-win
-          path: package/redmine-api-demo-win
+          path: redmine-api-demo-win.zip
           if-no-files-found: error
