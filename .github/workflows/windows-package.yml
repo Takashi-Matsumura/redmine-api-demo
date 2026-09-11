@@ -1,0 +1,109 @@
+name: Windows package
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify standalone output
+        run: test -d .next/standalone
+
+      - name: Assemble package
+        run: |
+          set -eu
+          OUT="package/redmine-api-demo-win"
+          mkdir -p "$OUT"
+          cp -R .next/standalone/. "$OUT/"
+          mkdir -p "$OUT/.next"
+          cp -R .next/static "$OUT/.next/static"
+          [ -d public ] && cp -R public "$OUT/public"
+
+      - name: Bundle Windows Node.js runtime
+        run: |
+          set -eu
+          NODE_VERSION=$(curl -sf https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts != false)][0].version')
+          echo "Bundling Node.js ${NODE_VERSION} (win-x64)"
+          curl -sfL -o node-win.zip "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x64.zip"
+          unzip -q node-win.zip "node-${NODE_VERSION}-win-x64/node.exe" -d node-extracted
+          cp "node-extracted/node-${NODE_VERSION}-win-x64/node.exe" "package/redmine-api-demo-win/node.exe"
+          echo "NODE_VERSION=${NODE_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Create start.bat and README.txt
+        run: |
+          set -eu
+          OUT="package/redmine-api-demo-win"
+          cat > "$OUT/start.bat" <<'BAT'
+          @echo off
+          cd /d %~dp0
+          set PORT=3000
+          title redmine-api-demo
+          echo redmine-api-demo を起動しています...（終了するにはこのウィンドウを閉じるかCtrl+Cを押してください）
+          start "" cmd /c "timeout /t 2 /nobreak >nul & start http://localhost:3000/"
+          "%~dp0node.exe" server.js
+          pause
+          BAT
+
+          cat > "$OUT/README.txt" <<TXT
+          redmine-api-demo Windows実機検証パッケージ
+          ============================================
+
+          パッケージ生成日: $(date -u +%Y-%m-%d)
+          ビルド元コミット: ${GITHUB_SHA}
+          同梱Node.jsバージョン: ${NODE_VERSION}（Windows x64版、LTS）
+
+          ■ 起動方法
+            start.bat をダブルクリックしてください。
+            数秒後に自動でブラウザ（http://localhost:3000/）が開きます。
+            終了するには、開いたコマンドプロンプトのウィンドウを閉じるか Ctrl+C を押してください。
+
+          ■ 事前準備
+            このパッケージにはNode.js（${NODE_VERSION}）が同梱されているため、
+            対象PCへのNode.jsのインストールは不要です。
+
+          ■ ポートについて
+            既定ではポート3000を使用します。
+            もし3000番ポートが他のアプリで使用中の場合は、start.bat 内の
+              set PORT=3000
+            の数値と、自動で開くブラウザのURLを同じ番号に書き換えてから再度お試しください。
+
+          ■ アプリの使い方
+            画面上部で以下を入力してください（このパッケージ自体には保存されません。
+            起動のたびに毎回入力が必要です）。
+              - Redmine URL（例: https://my.redmine.jp/xxxxx）
+              - APIキー
+            入力後、「一覧を取得」で対象月のチケット一覧を取得できます。
+            一覧の行をダブルクリックすると、チケットの詳細をダイアログで確認できます。
+
+          ■ セキュリティについて
+            Redmine URL・APIキーはこのパッケージのファイルには含まれておらず、
+            サーバー側にも保存されません。画面を閉じる・再読み込みすると入力値は消えます。
+          TXT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: redmine-api-demo-win
+          path: package/redmine-api-demo-win
+          if-no-files-found: error
