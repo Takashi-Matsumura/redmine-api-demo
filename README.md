@@ -49,11 +49,11 @@ npm run dev
 `main` への push をトリガーに、`.github/workflows/windows-package.yml` が以下を自動実行する。
 
 1. 本番ビルド（`npm run build`）と standalone 出力の組み立て
-2. Windows版Node.js（その時点の最新LTS）を自動取得して同梱
+2. Windows版Node.js（その時点の最新LTS）を、公式の `SHASUMS256.txt` でチェックサム検証したうえで同梱
 3. 起動用 `start.bat` と説明書 `README.txt` を生成
-4. `redmine-api-demo-win` という名前で GitHub Actions の artifact として公開
+4. パッケージ一式を `redmine-api-demo-win.zip` にまとめ、`redmine-api-demo-win` という名前で GitHub Actions の artifact として公開
 
-リポジトリの Actions タブから該当の実行を開き、artifact の zip をダウンロードすればよい（GitHubアカウントでのログインが必要。artifact の保存期間はデフォルト90日）。`workflow_dispatch` にも対応しているため、pushを待たずに手動実行もできる。
+リポジトリの Actions タブから該当の実行を開き、artifact をダウンロードする（GitHubアカウントでのログインが必要。artifact の保存期間はデフォルト90日）。GitHub はartifactを常にzipで包んでダウンロードさせるため、**展開すると中に `redmine-api-demo-win.zip` がもう一つ入っている**（二重zip）。そのzipをさらに展開すると `start.bat` などが出てくる。`workflow_dispatch` にも対応しているため、pushを待たずに手動実行もできる。
 
 ### ローカルでの手動パッケージ化
 

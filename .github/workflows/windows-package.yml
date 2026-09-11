@@ -45,8 +45,21 @@ jobs:
           set -eu
           NODE_VERSION=$(curl -sf https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts != false)][0].version')
           echo "Bundling Node.js ${NODE_VERSION} (win-x64)"
-          curl -sfL -o node-win.zip "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-win-x64.zip"
-          unzip -q node-win.zip "node-${NODE_VERSION}-win-x64/node.exe" -d node-extracted
+          ARCHIVE="node-${NODE_VERSION}-win-x64.zip"
+          curl -sfL -o "$ARCHIVE" "https://nodejs.org/dist/${NODE_VERSION}/${ARCHIVE}"
+          curl -sfL -o SHASUMS256.txt "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt"
+          EXPECTED_SHA=$(grep " ${ARCHIVE}\$" SHASUMS256.txt | awk '{print $1}')
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "SHASUMS256.txt に ${ARCHIVE} のチェックサムが見つかりません" >&2
+            exit 1
+          fi
+          ACTUAL_SHA=$(sha256sum "$ARCHIVE" | awk '{print $1}')
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "チェックサム不一致: expected=${EXPECTED_SHA} actual=${ACTUAL_SHA}" >&2
+            exit 1
+          fi
+          echo "チェックサム検証OK: ${ACTUAL_SHA}"
+          unzip -q "$ARCHIVE" "node-${NODE_VERSION}-win-x64/node.exe" -d node-extracted
           cp "node-extracted/node-${NODE_VERSION}-win-x64/node.exe" "package/redmine-api-demo-win/node.exe"
           echo "NODE_VERSION=${NODE_VERSION}" >> "$GITHUB_ENV"
 
@@ -101,9 +114,15 @@ jobs:
             サーバー側にも保存されません。画面を閉じる・再読み込みすると入力値は消えます。
           TXT
 
+      - name: Create zip archive
+        run: |
+          set -eu
+          cd package
+          zip -q -r ../redmine-api-demo-win.zip redmine-api-demo-win
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: redmine-api-demo-win
-          path: package/redmine-api-demo-win
+          path: redmine-api-demo-win.zip
           if-no-files-found: error
