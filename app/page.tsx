@@ -94,7 +94,9 @@ export default function Home() {
   const [modalError, setModalError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
-  async function handleFetchIssueList() {
+  const ISSUE_LIST_PAGE_SIZE = 100;
+
+  async function fetchIssueList(offset: number) {
     if (!redmineUrl || !apiKey) return;
 
     const range = monthToDateRange(targetMonth);
@@ -105,11 +107,11 @@ export default function Home() {
 
     setIssueListLoading(true);
     setIssueListError(null);
-    setIssueList(null);
 
     try {
       const params = new URLSearchParams({
-        limit: "100",
+        limit: String(ISSUE_LIST_PAGE_SIZE),
+        offset: String(offset),
         created_on_from: range.from,
         created_on_to: range.to,
         closed_only: closedOnly ? "1" : "0",
@@ -135,6 +137,21 @@ export default function Home() {
     } finally {
       setIssueListLoading(false);
     }
+  }
+
+  function handleFetchIssueList() {
+    setIssueList(null);
+    fetchIssueList(0);
+  }
+
+  function handlePrevPage() {
+    if (!issueList) return;
+    fetchIssueList(Math.max(0, issueList.offset - ISSUE_LIST_PAGE_SIZE));
+  }
+
+  function handleNextPage() {
+    if (!issueList) return;
+    fetchIssueList(issueList.offset + issueList.issues.length);
   }
 
   async function handleExportMarkdown() {
@@ -296,7 +313,7 @@ export default function Home() {
               <p className="text-xs text-zinc-500">
                 {issueList.total_count}件中 {issueList.offset + 1}〜
                 {issueList.offset + issueList.issues.length}
-                件を表示（行をダブルクリックで詳細表示。一覧の表示は先頭100件までですが、MDエクスポートは全件を含みます）
+                件を表示（行をダブルクリックで詳細表示。MDエクスポートはページに関わらず全件を含みます）
               </p>
               <ul className="flex flex-col divide-y divide-black/[.08] rounded border border-black/[.1] dark:divide-white/[.1] dark:border-white/[.15]">
                 {issueList.issues.map((i) => (
@@ -316,6 +333,35 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
+
+              {issueList.total_count > issueList.issues.length && (
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrevPage}
+                    disabled={issueListLoading || issueList.offset === 0}
+                    className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
+                  >
+                    前へ
+                  </button>
+                  <span className="text-xs text-zinc-500">
+                    {Math.floor(issueList.offset / ISSUE_LIST_PAGE_SIZE) + 1} /{" "}
+                    {Math.ceil(issueList.total_count / ISSUE_LIST_PAGE_SIZE)} ページ
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNextPage}
+                    disabled={
+                      issueListLoading ||
+                      issueList.offset + issueList.issues.length >=
+                        issueList.total_count
+                    }
+                    className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
+                  >
+                    次へ
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -343,6 +389,9 @@ export default function Home() {
           </li>
           <li>
             「完了（クローズ）済みのみ」をON/OFFして一覧の件数が変わることを確認し、ON時の件数が実際のRedmine画面で同条件（起票日がその月かつステータスが終了系）に絞った件数と一致するか確認する。
+          </li>
+          <li>
+            101件以上ある月で「次へ」「前へ」を操作し、ページが重複・欠落なく切り替わること（表示範囲の件数表示と実際の行数が一致すること）を確認する。
           </li>
           <li>
             「MDでエクスポート」でダウンロードしたファイルの front matter の issue_count が、同条件で一覧取得した total_count と一致するか確認する（101件以上ある月は特に）。
