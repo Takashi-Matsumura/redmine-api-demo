@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import {
   DEFAULT_MAX_ATTACHMENT_BYTES,
   downloadAttachment,
+  getIssueStatuses,
   getIssuesCreatedOrUpdated,
   getIssuesDetailed,
   isValidRedmineId,
@@ -13,6 +14,7 @@ import { readConnection } from "@/lib/connection";
 import { monthToDateRange } from "@/lib/month";
 import { issueToDocx, type AttachmentEntry } from "@/lib/docx";
 import { sanitizeFileName, UniqueNamer } from "@/lib/filename";
+import { analyzeReopenForExport } from "@/lib/reopen";
 
 // 添付ファイルのダウンロードを含むため、既定のタイムアウトに触れないようにする。
 export const maxDuration = 300;
@@ -72,11 +74,18 @@ export async function GET(req: NextRequest) {
 
     // 一覧の応答に正の整数でない ID が含まれていれば、取得に失敗したものとして扱う
     const invalidIdCount = summaries.filter((s) => !isValidRedmineId(s.id)).length;
-    const { issues, failures } = await getIssuesDetailed(
-      conn,
-      summaries.map((s) => s.id).filter(isValidRedmineId),
-      { include: ["journals", "attachments"] },
-    );
+    const [{ issues, failures }, statuses] = await Promise.all([
+      getIssuesDetailed(
+        conn,
+        summaries.map((s) => s.id).filter(isValidRedmineId),
+        { include: ["journals", "attachments"] },
+      ),
+      // 再開の検知の補助にのみ使うため、取得できなくても出力は続ける
+      getIssueStatuses(conn).catch((err) => {
+        console.error("Redmine issue status fetch failed:", err);
+        return null;
+      }),
+    ]);
 
     const rootFolder = `redmine-${month}`;
     const zip = new JSZip();
@@ -160,7 +169,11 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const docx = await issueToDocx(issue, { redmineBaseUrl: conn.redmineUrl, attachments: entries });
+      const docx = await issueToDocx(issue, {
+        redmineBaseUrl: conn.redmineUrl,
+        attachments: entries,
+        reopen: analyzeReopenForExport(issue, statuses),
+      });
       zip.file(`${folder}/${docxName}`, docx);
     }
 

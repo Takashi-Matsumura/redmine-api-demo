@@ -74,6 +74,7 @@ export function analyzeReopen(
     journals?: RedmineJournal[];
   },
   statuses: { id: number; name: string; is_closed: boolean }[] | null,
+  opts?: { excludePrivateNotes?: boolean },
 ): ReopenAnalysis {
   const byId = new Map((statuses ?? []).map((s) => [String(s.id), s]));
   const toRef = (value: string | null | undefined): StatusRef | null => {
@@ -114,7 +115,12 @@ export function analyzeReopen(
   const closedOn = issue.closed_on;
   const notesAfterClose =
     issue.is_closed === true && closedOn
-      ? journals.filter((j) => j.notes && isAfterClose(j.created_on, closedOn)).length
+      ? journals.filter(
+          (j) =>
+            j.notes &&
+            !(opts?.excludePrivateNotes && j.private_notes) &&
+            isAfterClose(j.created_on, closedOn),
+        ).length
       : 0;
 
   return {
@@ -123,4 +129,40 @@ export function analyzeReopen(
     reopen_count: statusChanges.filter((c) => c.kind === "reopen").length,
     notes_after_close: notesAfterClose,
   };
+}
+
+/** 出力（docx / Markdown）向けの、再開の検知結果を1行で表した文。 */
+export function reopenSummaryText(reopen: ReopenAnalysis): string {
+  const parts: string[] = [];
+  if (reopen.signal === "reopened") parts.push("再開済み（クローズ後に未完了へ戻されています）");
+  if (reopen.signal === "updated_after_close") parts.push("クローズ後に更新あり（再開の兆候）");
+  if (reopen.reopen_count > 0) parts.push(`再開${reopen.reopen_count}回`);
+  if (reopen.notes_after_close > 0) parts.push(`クローズ後のコメント${reopen.notes_after_close}件`);
+  return parts.length > 0 ? parts.join(" / ") : "なし";
+}
+
+/** ステータス変更1件を「旧 → 新」の文にする。 */
+export function statusChangeText(change: StatusChange): string {
+  const name = (r: StatusRef | null) => r?.name ?? "(なし)";
+  const mark = change.kind === "reopen" ? "（再開）" : change.kind === "close" ? "（クローズ）" : "";
+  return `${name(change.from)} → ${name(change.to)}${mark}`;
+}
+
+/**
+ * 出力用に、チケットごとの再開の検知結果を求める。
+ * 出力にはプライベート注記を含めないため、クローズ後のコメント数からも除く。
+ * statuses が null（ステータス一覧を取得できなかった）でも、Redmine 5.1 以降は issue 内の is_closed で判定できる。
+ */
+export function analyzeReopenForExport(
+  issue: {
+    status: { id: number; is_closed?: boolean };
+    closed_on?: string | null;
+    updated_on: string;
+    journals?: RedmineJournal[];
+  },
+  statuses: { id: number; name: string; is_closed: boolean }[] | null,
+): ReopenAnalysis {
+  const isClosed =
+    issue.status.is_closed ?? statuses?.find((s) => s.id === issue.status.id)?.is_closed ?? null;
+  return analyzeReopen({ ...issue, is_closed: isClosed }, statuses, { excludePrivateNotes: true });
 }

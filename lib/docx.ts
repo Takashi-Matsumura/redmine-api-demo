@@ -13,6 +13,7 @@ import {
   WidthType,
 } from "docx";
 import type { RedmineAttachment, RedmineIssue } from "@/lib/redmine";
+import { reopenSummaryText, statusChangeText, type ReopenAnalysis } from "@/lib/reopen";
 
 /** docx に載せる添付ファイル1件の扱い。zipName があれば同じフォルダに保存済み、なければ skippedReason を表示する。 */
 export interface AttachmentEntry {
@@ -71,7 +72,7 @@ function heading(text: string): Paragraph {
 /** チケット1件（journals・attachments 込み）を docx のバイナリに変換する。 */
 export async function issueToDocx(
   issue: RedmineIssue,
-  opts: { redmineBaseUrl: string; attachments: AttachmentEntry[] },
+  opts: { redmineBaseUrl: string; attachments: AttachmentEntry[]; reopen?: ReopenAnalysis },
 ): Promise<Buffer> {
   const issueUrl = `${opts.redmineBaseUrl.replace(/\/+$/, "")}/issues/${issue.id}`;
 
@@ -84,6 +85,8 @@ export async function issueToDocx(
     ["担当者", issue.assigned_to?.name ?? "未割当"],
     ["作成日時", formatDateTime(issue.created_on)],
     ["更新日時", formatDateTime(issue.updated_on)],
+    ["最終クローズ日時", issue.closed_on ? formatDateTime(issue.closed_on) : "なし"],
+    ["再開の検知", opts.reopen ? reopenSummaryText(opts.reopen) : "判定不可"],
   ];
 
   const metaTable = new Table({
@@ -128,6 +131,33 @@ export async function issueToDocx(
     );
   }
 
+  const statusChanges = opts.reopen?.status_changes ?? [];
+  const statusSection: (Paragraph | Table)[] = [];
+  if (statusChanges.length > 0) {
+    statusSection.push(
+      heading(`ステータス変更履歴（${statusChanges.length}件）`),
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            tableHeader: true,
+            children: ["日時", "変更者", "変更内容"].map((h) => cell(h, { bold: true, shade: true })),
+          }),
+          ...statusChanges.map(
+            (c) =>
+              new TableRow({
+                children: [
+                  cell(formatDateTime(c.created_on), { width: 25 }),
+                  cell(c.user?.name ?? "不明なユーザー", { width: 25 }),
+                  cell(statusChangeText(c), { width: 50 }),
+                ],
+              }),
+          ),
+        ],
+      }),
+    );
+  }
+
   const notes = (issue.journals ?? []).filter((j) => j.notes && !j.private_notes);
   const commentSection: Paragraph[] = [heading(`コメント（${notes.length}件）`)];
   if (notes.length === 0) {
@@ -162,6 +192,7 @@ export async function issueToDocx(
           heading("説明"),
           ...multilineParagraphs(issue.description),
           ...attachmentSection,
+          ...statusSection,
           ...commentSection,
         ],
       },
