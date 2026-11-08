@@ -5,6 +5,7 @@ import type { RedmineIssue, RedmineIssueResponse } from "@/lib/redmine";
 import type { IssueListItem, IssueListResponse } from "@/lib/issue-list";
 import { currentMonthValue } from "@/lib/month";
 import { AquaButton, DocumentIcon, ListIcon, MarkdownIcon } from "./aqua-button";
+import { UsageGuide } from "./usage-guide";
 
 /** 一覧の各行に出す、クローズ済み／進行中の区別。 */
 function ClosedBadge({ isClosed }: { isClosed: IssueListItem["is_closed"] }) {
@@ -486,47 +487,7 @@ export default function Home() {
       </main>
 
       <aside className="w-full shrink-0 border-t border-black/[.1] px-6 py-16 dark:border-white/[.15] lg:w-96 lg:border-t-0 lg:border-l lg:pl-10">
-        <h2 className="text-lg font-semibold text-black dark:text-zinc-50">
-          実環境 検証手順
-        </h2>
-        <ol className="mt-4 flex list-decimal flex-col gap-4 pl-5 text-sm text-black dark:text-zinc-50">
-          <li>
-            上のRedmine URLとAPIキーを実環境の値で入力する。
-          </li>
-          <li>
-            対象月を選び「一覧取得」をクリックし、実際のRedmine画面で「作成日がその月」または「更新日がその月」のチケットと件数が一致するか確認する（Redmine画面では2つの条件で別々に絞り込み、重複を除いて合算する）。
-          </li>
-          <li>
-            一覧の行をダブルクリックし、ダイアログに表示された詳細（ステータス・担当者・説明・journalsのnotes）が実際のRedmine画面と一致するか確認する。
-          </li>
-          <li>
-            誤ったAPIキーやRedmine URLを入力し、エラーメッセージが適切に表示されるか確認する。
-          </li>
-          <li>
-            ダイアログ内の「生JSONレスポンス」を開き、想定外のフィールドや欠落がないか確認する。
-          </li>
-          <li>
-            一覧の「クローズ」「進行中」の表示が、Redmine のステータス設定（「終了したチケット」にチェックがあるか）と一致するか確認する。
-          </li>
-          <li>
-            101件以上ある月で「次へ」「前へ」を操作し、ページが重複・欠落なく切り替わること（表示範囲の件数表示と実際の行数が一致すること）を確認する。
-          </li>
-          <li>
-            「docx出力」で取得したZipを展開し、チケットIDのフォルダ数が一覧の「クローズ」件数と一致するか確認する。
-          </li>
-          <li>
-            添付ファイルのあるチケットのフォルダを開き、添付ファイルが docx と同じ場所にすべて揃っていること、Word で docx を開いて内容（説明・コメント・添付一覧）が Redmine 画面と一致することを確認する。
-          </li>
-          <li>
-            「MD出力」でダウンロードしたファイルの front matter の issue_count が、一覧の件数（「出力はクローズ済みのチケットのみ」がONならクローズの件数）と一致するか確認する。チェックのON/OFFを切り替えて docx出力でも同様に確認する（101件以上ある月は特に）。
-          </li>
-          <li>
-            エクスポートしたファイルを開き、front matter・チケットの区切り・見出し階層が崩れていないこと、プライベート注記が本文に含まれていないことを確認する。
-          </li>
-        </ol>
-        <p className="mt-6 text-xs text-zinc-500">
-          この手順は画面表示用の固定テキストです。実環境のAPIキー等は送信・保存されません。
-        </p>
+        <UsageGuide />
       </aside>
 
       <dialog
