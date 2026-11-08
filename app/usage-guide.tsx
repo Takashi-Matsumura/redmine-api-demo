@@ -53,6 +53,11 @@ export function UsageGuide() {
             <li>件名は50文字まで。ファイル名に使えない文字は「_」に置き換え、同じ名前の添付には「(2)」などの番号を付けます。</li>
             <li>添付は1件100MB・全体で1GB・5000件まで。取得できなかった添付は、docx の添付一覧に理由を記載します。</li>
           </ul>
+          <p className="text-xs text-zinc-500">
+            ※ Zip はエクスプローラー（Windows）や Finder（Mac）で展開してください。Mac のターミナルの{" "}
+            <code>unzip</code> コマンドは日本語のファイル名を扱えず、展開に失敗します。ターミナルで展開する場合は{" "}
+            <code>ditto -x -k redmine-2026-10.zip 展開先</code> を使ってください。
+          </p>
         </div>
         <div className="flex flex-col gap-2">
           <h4 className="font-medium">MD出力</h4>
