@@ -1,6 +1,6 @@
 # redmine-api-demo
 
-Redmine REST API から対象月のチケット一覧・詳細（コメント履歴を含む）を確認できる検証ツール。あわせて、対象月のクローズ済みチケットをチケットごとの docx と添付ファイルにまとめて Zip でエクスポートする機能（SharePoint での管理用）と、対象月の全チケットを1つのMarkdownファイルとしてエクスポートする機能を持つ。8年分蓄積されたRedmineのチケットをナレッジとして書き出し、GitHub Copilot等に読み込ませる用途を想定している。DB・キャッシュ層、認証機能は持たない。
+Redmine REST API から対象月のチケット一覧・詳細（コメント履歴を含む）を確認できる検証ツール。あわせて、対象月のチケットをチケットごとの docx と添付ファイルにまとめて Zip でエクスポートする機能（SharePoint での管理用）と、1つのMarkdownファイルとしてエクスポートする機能を持つ。8年分蓄積されたRedmineのチケットをナレッジとして書き出し、GitHub Copilot等に読み込ませる用途を想定している。DB・キャッシュ層、認証機能は持たない。
 
 ## 使い方
 
@@ -37,7 +37,7 @@ npm run dev
 
 ### チケット一覧
 
-「チケット一覧」で対象月（例: 2026年8月）を選び「一覧を取得」を押すと、その月に**作成または更新された**チケットが全ステータスで一覧表示される（ID降順）。各行には「クローズ」「進行中」のバッジを表示し、件数の内訳も表示する。
+「チケット一覧」で対象月（例: 2026年8月）を選び「一覧取得」を押すと、その月に**作成または更新された**チケットが全ステータスで一覧表示される（ID降順）。各行には「クローズ」「進行中」のバッジを表示し、件数の内訳も表示する。
 
 - Redmine のフィルタは OR を指定できないため、作成日（`created_on`）での絞り込みと更新日（`updated_on`）での絞り込みを別々に全件取得し、IDで重複を除いて結合している（`lib/redmine.ts` の `getIssuesCreatedOrUpdated()`）。上限は各1000件
 - クローズかどうかは、Redmine 5.1 以降で issue の `status.is_closed` が返る場合はそれを使い、無い場合は `/issue_statuses.json` の `is_closed` で判定する
@@ -46,9 +46,13 @@ npm run dev
 
 一覧の行を**ダブルクリック**すると、そのチケットの詳細がダイアログで表示される。ダイアログには `id` / `subject` / `project.name` / `tracker.name` / `status.name` / `priority.name` / `author.name` / `assigned_to.name` / `created_on` / `updated_on` / `description` に加え、journals（履歴）のうち notes（コメント）を持つものが**全件**時系列順で表示される。デバッグ用に生のJSONレスポンスをダイアログ内の `<details>` に表示する。ダイアログは「閉じる」ボタンまたは Esc キーで閉じられる。
 
-### docx(Zip)エクスポート
+### エクスポートの対象
 
-「クローズ済みをdocx(Zip)でエクスポート」を押すと、一覧と同じ条件（対象月に作成または更新）のうち**クローズ済み**のチケットを、次の構成の Zip（`redmine-YYYY-MM.zip`）としてダウンロードする。
+docx出力・MD出力はどちらも、一覧と同じ条件（対象月に**作成または更新**）のチケットを対象とする。「出力はクローズ済みのチケットのみ」チェックボックス（既定ON）は両方の出力に効き、ONならクローズ済みのチケットのみ、OFFなら全ステータスのチケットを出力する。一覧の表示はチェックボックスに関わらず全ステータス。
+
+### docx出力
+
+「docx出力」を押すと、対象のチケットを次の構成の Zip（`redmine-YYYY-MM.zip`）としてダウンロードする。
 
 ```
 redmine-2026-08.zip
@@ -69,7 +73,7 @@ redmine-2026-08.zip
 
 ### Markdownエクスポート
 
-「MDでエクスポート」を押すと、対象月の条件（**起票日**の範囲、「MDエクスポートは完了（クローズ）済みのみ」チェックボックスの状態）に合致する**全チケット**（一覧のページ数に関わらず全件）を1つのMarkdownファイル（`redmine-YYYY-MM.md`）としてダウンロードする。
+「MD出力」を押すと、対象のチケット全件（一覧のページ数に関わらず全件）を1つのMarkdownファイル（`redmine-YYYY-MM.md`）としてダウンロードする。
 
 - 各チケットは見出し・メタ情報（プロジェクト/トラッカー/ステータス/優先度/起票者/担当者/日付）・説明・コメント（journalsのnotes）で構成される
 - プライベート注記（`private_notes: true` のjournal）は本文に含めず、除外件数のみ front matter の `excluded_private_notes` に記録する
@@ -89,9 +93,9 @@ redmine-2026-08.zip
 
 - `app/page.tsx`: 確認用画面（Client Component）。入力フォーム・一覧表示（ページネーション）・詳細ダイアログ・エクスポートボタン
 - `app/api/issues/route.ts`: Route Handler。`month=YYYY-MM` で、その月に作成または更新されたチケットを全件返す。各チケットにクローズ済みかどうか（`is_closed`）を付ける
-- `app/api/export-docx/route.ts`: Route Handler。対象月のクローズ済みチケットを、チケットごとの docx と添付ファイルにまとめた Zip として返す
+- `app/api/export-docx/route.ts`: Route Handler。対象月のチケットを、チケットごとの docx と添付ファイルにまとめた Zip として返す（`closed_only=1` でクローズ済みのみ）
 - `app/api/issue/[id]/route.ts`: Route Handler。チケット1件を journals 込みで取得する
-- `app/api/export/route.ts`: Route Handler。対象月の全チケットを取得し、Markdownとして返す（`Content-Disposition: attachment`）
+- `app/api/export/route.ts`: Route Handler。対象月のチケットを全件取得し、Markdownとして返す（`closed_only=1` でクローズ済みのみ。`Content-Disposition: attachment`）
 - `lib/redmine.ts`: Redmine REST API クライアント（`import "server-only"`）。`getIssues()` / `getIssue()` に加え、全件ページング取得の `getAllIssues()`、作成または更新で絞る `getIssuesCreatedOrUpdated()`、チケット詳細の並行取得（失敗を個別集計）を行う `getIssuesDetailed()`、ステータス一覧の `getIssueStatuses()`、添付ファイル取得の `downloadAttachment()` を実装
 - `lib/markdown.ts`: チケット配列をMarkdown文字列に変換する純粋関数（`issuesToMarkdown()`）
 - `lib/docx.ts`: チケット1件を docx に変換する（`issueToDocx()`、`docx` パッケージを使用）

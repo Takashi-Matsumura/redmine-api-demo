@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getAllIssues, getIssuesDetailed } from "@/lib/redmine";
+import { getIssuesCreatedOrUpdated, getIssuesDetailed } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
 import { readConnection } from "@/lib/connection";
 import { monthToDateRange } from "@/lib/month";
@@ -31,9 +31,11 @@ export async function GET(req: NextRequest) {
   const closedOnly = req.nextUrl.searchParams.get("closed_only") === "1";
 
   try {
-    const { issues: summaries, totalCount, truncated } = await getAllIssues(
+    // 一覧・docx出力と同じく、対象月に作成または更新されたチケットを対象にする
+    const { issues: summaries, truncated } = await getIssuesCreatedOrUpdated(
       conn,
-      { createdOnFrom: range.from, createdOnTo: range.to, closedOnly },
+      range,
+      { closedOnly },
     );
 
     const { issues, failures } = await getIssuesDetailed(
@@ -56,9 +58,7 @@ export async function GET(req: NextRequest) {
       closedOnly,
       excludedPrivateNotes,
       failures,
-      truncated: truncated
-        ? { totalCount, fetchedCount: summaries.length }
-        : undefined,
+      truncated: truncated ? { fetchedCount: summaries.length } : undefined,
       exportedAt: new Date().toISOString(),
     });
 

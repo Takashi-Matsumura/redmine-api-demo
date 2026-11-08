@@ -30,7 +30,8 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * 対象月に作成または更新されたクローズ済みチケットを、チケットごとの docx と添付ファイルにまとめた Zip で返す。
+ * 対象月に作成または更新されたチケットを、チケットごとの docx と添付ファイルにまとめた Zip で返す。
+ * closed_only=1 の場合はクローズ済みのチケットのみを対象にする。
  *
  * redmine-YYYY-MM.zip
  * └─ redmine-YYYY-MM/
@@ -53,15 +54,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const closedOnly = req.nextUrl.searchParams.get("closed_only") === "1";
     const { issues: summaries, truncated } = await getIssuesCreatedOrUpdated(
       conn,
       range,
-      { closedOnly: true },
+      { closedOnly },
     );
 
     if (summaries.length === 0) {
       return Response.json(
-        { error: `${month} に作成・更新されたクローズ済みチケットはありません` },
+        {
+          error: `${month} に作成・更新された${closedOnly ? "クローズ済みの" : ""}チケットはありません`,
+        },
         { status: 404 },
       );
     }

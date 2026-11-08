@@ -165,7 +165,10 @@ export default function Home() {
     setDocxExportResult(null);
 
     try {
-      const params = new URLSearchParams({ month: targetMonth });
+      const params = new URLSearchParams({
+        month: targetMonth,
+        closed_only: closedOnly ? "1" : "0",
+      });
       const res = await fetch(`/api/export-docx?${params.toString()}`, {
         headers: redmineHeaders(),
       });
@@ -191,7 +194,9 @@ export default function Home() {
       const skipped = Number(res.headers.get("X-Export-Skipped-Attachments") ?? "0");
       const truncated = res.headers.get("X-Export-Truncated") === "1";
 
-      const lines = [`クローズ済みチケット ${issueCount}件をエクスポートしました。`];
+      const lines = [
+        `${closedOnly ? "クローズ済みの" : ""}チケット ${issueCount}件をエクスポートしました。`,
+      ];
       const invalid = Number(res.headers.get("X-Export-Invalid-Issues") ?? "0");
       if (invalid > 0) {
         lines.push(`IDが不正なため除外したチケット: ${invalid}件`);
@@ -357,7 +362,7 @@ export default function Home() {
               disabled={!canFetch || !targetMonth}
               loading={docxExportLoading}
               loadingLabel="出力中…"
-              title="クローズ済みのチケットを、チケットごとの docx と添付ファイルにまとめた Zip でダウンロードします"
+              title="チケットごとの docx と添付ファイルにまとめた Zip をダウンロードします"
             >
               docx出力
             </AquaButton>
@@ -367,7 +372,7 @@ export default function Home() {
               disabled={!canFetch || !targetMonth}
               loading={exportLoading}
               loadingLabel="出力中…"
-              title="対象月に起票されたチケットを1つの Markdown ファイルでダウンロードします"
+              title="チケットを1つの Markdown ファイルにまとめてダウンロードします"
             >
               MD出力
             </AquaButton>
@@ -379,10 +384,10 @@ export default function Home() {
               checked={closedOnly}
               onChange={(e) => setClosedOnly(e.target.checked)}
             />
-            MD出力は完了（クローズ）済みのみ（起票日が対象月のチケットが対象）
+            出力はクローズ済みのチケットのみ（docx出力・MD出力共通）
           </label>
           <p className="text-xs text-zinc-500">
-            一覧は、対象月に作成または更新されたチケットを全ステータス表示します。「docx出力」はそのうちクローズ済みのチケットのみを、チケットごとの docx と添付ファイルにまとめた Zip でダウンロードします。
+            一覧は、対象月に作成または更新されたチケットを全ステータス表示します。docx出力・MD出力も同じ条件のチケットを対象とし、上のチェックがONならそのうちクローズ済みのチケットのみを出力します。
           </p>
 
           {!canFetch && (
@@ -513,7 +518,7 @@ export default function Home() {
             添付ファイルのあるチケットのフォルダを開き、添付ファイルが docx と同じ場所にすべて揃っていること、Word で docx を開いて内容（説明・コメント・添付一覧）が Redmine 画面と一致することを確認する。
           </li>
           <li>
-            「MD出力」でダウンロードしたファイルの front matter の issue_count が、同条件で一覧取得した total_count と一致するか確認する（101件以上ある月は特に）。
+            「MD出力」でダウンロードしたファイルの front matter の issue_count が、一覧の件数（「出力はクローズ済みのチケットのみ」がONならクローズの件数）と一致するか確認する。チェックのON/OFFを切り替えて docx出力でも同様に確認する（101件以上ある月は特に）。
           </li>
           <li>
             エクスポートしたファイルを開き、front matter・チケットの区切り・見出し階層が崩れていないこと、プライベート注記が本文に含まれていないことを確認する。
