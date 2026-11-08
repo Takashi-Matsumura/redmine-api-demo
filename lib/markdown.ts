@@ -8,8 +8,8 @@ export interface ExportMeta {
   closedOnly: boolean;
   excludedPrivateNotes: number;
   failures: { id: number; message: string }[];
-  /** 件数上限（safety valve）で全件取得しきれなかった場合の { 総数, 取得数 }。 */
-  truncated?: { totalCount: number; fetchedCount: number };
+  /** 件数上限（safety valve）で全件取得しきれなかった場合の取得数。 */
+  truncated?: { fetchedCount: number };
   exportedAt: string;
 }
 
@@ -73,7 +73,7 @@ export function issuesToMarkdown(
   issues: RedmineIssue[],
   meta: ExportMeta,
 ): string {
-  const filterDesc = `created_on ${meta.from}..${meta.to}${meta.closedOnly ? " / status:closed" : ""}`;
+  const filterDesc = `created_on or updated_on ${meta.from}..${meta.to}${meta.closedOnly ? " / status:closed" : ""}`;
 
   const frontMatter = [
     "---",
@@ -87,7 +87,6 @@ export function issuesToMarkdown(
     ...(meta.truncated
       ? [
           `truncated: true`,
-          `truncated_total_count: ${meta.truncated.totalCount}`,
           `truncated_fetched_count: ${meta.truncated.fetchedCount}`,
         ]
       : []),
@@ -115,7 +114,7 @@ export function issuesToMarkdown(
   if (meta.truncated) {
     sections.push("\n---\n");
     sections.push(
-      `## 注意: 件数上限に達しました\n\n対象 ${meta.truncated.totalCount}件中 ${meta.truncated.fetchedCount}件のみ取得しました。`,
+      `## 注意: 件数上限に達しました\n\n件数上限に達したため ${meta.truncated.fetchedCount}件のみ取得しました。一部のチケットは含まれていません。`,
     );
   }
 
