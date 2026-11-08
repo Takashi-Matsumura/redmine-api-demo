@@ -332,6 +332,14 @@ function specialIssues(): RedmineIssue[] {
       updatedOn: c,
     }),
     buildIssue({
+      id: 9010,
+      subject: "【サンプル】詳細の応答に別のIDが返るチケット",
+      description: "詳細の応答の id が \"../../9010\" になっている（不正なサーバを想定）。フォルダ名には使われず、「取得に失敗したチケット」として表示される。",
+      statusId: 5,
+      createdOn: c,
+      updatedOn: u,
+    }),
+    buildIssue({
       id: 9009,
       subject: "【サンプル】詳細の取得に失敗するチケット",
       description: "このチケットは一覧には出るが、詳細の取得で 500 エラーになる。エクスポート後に「取得に失敗したチケット」として表示される。",
@@ -341,6 +349,9 @@ function specialIssues(): RedmineIssue[] {
     }),
   ];
 }
+
+/** 詳細の応答で要求と異なる ID を返すチケットID（応答 ID の検証の確認用）。 */
+const SAMPLE_MISMATCHED_ID_ISSUE_IDS = new Set<number>([9010]);
 
 /** 詳細の取得で 500 を返すチケットID（取得失敗の確認用）。 */
 export const SAMPLE_BROKEN_ISSUE_IDS = new Set<number>([9009]);
@@ -431,6 +442,8 @@ export function sampleIssue(
   if (!issue) return undefined;
   return {
     ...toSummary(issue),
+    // 不正なサーバを想定し、要求とは異なる（パスとして危険な）ID を返す
+    ...(SAMPLE_MISMATCHED_ID_ISSUE_IDS.has(id) ? { id: `../../${id}` as unknown as number } : {}),
     ...(include.includes("journals") ? { journals: issue.journals } : {}),
     ...(include.includes("attachments") ? { attachments: issue.attachments } : {}),
   };

@@ -516,6 +516,11 @@ export async function getIssuesCreatedOrUpdated(
   };
 }
 
+/** Redmine の応答に含まれる ID が正の整数かどうか。応答は信用せず、パスや URL に使う前に必ず確認する。 */
+export function isValidRedmineId(id: unknown): id is number {
+  return typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+}
+
 const DEFAULT_DETAIL_CONCURRENCY = 4;
 
 /**
@@ -541,6 +546,11 @@ export async function getIssuesDetailed(
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await getIssue(String(id), conn, { include: opts?.include });
+        // 応答の id は Zip のフォルダ名などに使われるため、要求した id と一致しない応答は採用しない
+        if (res.issue?.id !== id) {
+          failures.push({ id, message: "要求したチケットと異なるIDの応答が返されました" });
+          return;
+        }
         slots[index] = res.issue;
         return;
       } catch (err) {
