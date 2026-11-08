@@ -21,6 +21,14 @@ export interface RedmineNamed {
   name: string;
 }
 
+/** journal の変更内容1件。ステータス変更は property="attr", name="status_id" で、値はステータスIDの文字列。 */
+export interface RedmineJournalDetail {
+  property: string;
+  name: string;
+  old_value?: string | null;
+  new_value?: string | null;
+}
+
 export interface RedmineJournal {
   id: number;
   notes?: string;
@@ -28,6 +36,7 @@ export interface RedmineJournal {
   user?: RedmineNamed;
   /** true の場合、閲覧権限のある一部ユーザーのみに公開される注記。エクスポートでは除外する。 */
   private_notes?: boolean;
+  details?: RedmineJournalDetail[];
 }
 
 export interface RedmineAttachment {
@@ -59,6 +68,11 @@ export interface RedmineIssue {
   assigned_to?: RedmineNamed;
   created_on: string;
   updated_on: string;
+  /**
+   * 最後にクローズされた日時（Redmine 3.0 以降）。一度もクローズされていなければ null。
+   * Redmine は再開時にこの値を消さないため、「未完了なのに値がある」なら再開されたチケットと判定できる。
+   */
+  closed_on?: string | null;
   journals?: RedmineJournal[];
   attachments?: RedmineAttachment[];
 }

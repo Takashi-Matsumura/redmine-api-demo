@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { RedmineIssue, RedmineIssueResponse } from "@/lib/redmine";
-import type { IssueListItem, IssueListResponse } from "@/lib/issue-list";
+import type { IssueDetailResponse, IssueListItem, IssueListResponse } from "@/lib/issue-list";
+import type { ReopenAnalysis, StatusChange } from "@/lib/reopen";
 import { currentMonthValue } from "@/lib/month";
 import { AquaButton, DocumentIcon, ListIcon, MarkdownIcon } from "./aqua-button";
 import { UsageGuide } from "./usage-guide";
@@ -27,8 +27,90 @@ function ClosedBadge({ isClosed }: { isClosed: IssueListItem["is_closed"] }) {
   );
 }
 
+/** 再開済み／クローズ後に更新あり の目印。該当しなければ何も出さない。 */
+function ReopenBadge({ signal }: { signal: IssueListItem["reopen_signal"] }) {
+  if (signal === "reopened") {
+    return (
+      <span
+        title="一度クローズされた後、未完了のステータスに戻されています"
+        className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+      >
+        再開済み
+      </span>
+    );
+  }
+  if (signal === "updated_after_close") {
+    return (
+      <span
+        title="クローズ済みですが、最後にクローズした後に更新（コメント等）があります"
+        className="shrink-0 rounded border border-amber-400 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-700 dark:text-amber-300"
+      >
+        クローズ後に更新
+      </span>
+    );
+  }
+  return null;
+}
+
+type ReopenFilter = "all" | "reopened" | "updated_after_close";
+
+function statusChangeLabel(c: StatusChange): string {
+  const name = (r: StatusChange["from"]) => r?.name ?? "(なし)";
+  return `${name(c.from)} → ${name(c.to)}`;
+}
+
+/** 詳細ダイアログの「再開の検知」欄。journals のステータス変更履歴と判定結果を表示する。 */
+function ReopenSection({ reopen }: { reopen: ReopenAnalysis }) {
+  const summary: string[] = [];
+  if (reopen.signal === "reopened") summary.push("現在は再開中です（クローズ後に未完了へ戻されています）。");
+  if (reopen.signal === "updated_after_close") summary.push("クローズ済みですが、最後にクローズした後に更新があります。");
+  if (reopen.notes_after_close > 0) summary.push(`クローズ後のコメント: ${reopen.notes_after_close}件`);
+  if (reopen.reopen_count > 0) summary.push(`これまでの再開回数: ${reopen.reopen_count}回`);
+
+  return (
+    <div>
+      <p className="text-sm font-medium text-zinc-500">再開の検知</p>
+      {summary.length > 0 ? (
+        <ul className="mb-2 list-disc pl-5 text-sm text-amber-900 dark:text-amber-200">
+          {summary.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-2 text-sm text-zinc-500">再開の形跡はありません。</p>
+      )}
+      <p className="text-xs text-zinc-500">ステータス変更履歴（{reopen.status_changes.length}件）</p>
+      {reopen.status_changes.length === 0 ? (
+        <p className="text-sm text-zinc-500">(ステータス変更の履歴なし)</p>
+      ) : (
+        <ol className="flex flex-col gap-1 text-sm text-black dark:text-zinc-50">
+          {reopen.status_changes.map((c) => (
+            <li key={`${c.journal_id}-${statusChangeLabel(c)}`} className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-zinc-500">
+                {c.created_on} / {c.user?.name ?? "unknown"}
+              </span>
+              <span>{statusChangeLabel(c)}</span>
+              {c.kind === "reopen" && (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                  再開
+                </span>
+              )}
+              {c.kind === "close" && (
+                <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-xs text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200">
+                  クローズ
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 /** チケット詳細（ステータス・担当者・説明・journalsのnotes）の表示。詳細ダイアログで使う。 */
-function IssueDetailView({ issue }: { issue: RedmineIssue }) {
+function IssueDetailView({ detail }: { detail: IssueDetailResponse }) {
+  const { issue } = detail;
   const journals = issue.journals ?? [];
   const notes = journals.filter((j) => j.notes);
 
@@ -55,7 +137,11 @@ function IssueDetailView({ issue }: { issue: RedmineIssue }) {
         <dd>{issue.created_on}</dd>
         <dt className="font-medium text-zinc-500">updated_on</dt>
         <dd>{issue.updated_on}</dd>
+        <dt className="font-medium text-zinc-500">closed_on</dt>
+        <dd>{issue.closed_on ?? "(一度もクローズされていません)"}</dd>
       </dl>
+
+      <ReopenSection reopen={detail.reopen} />
 
       <div>
         <p className="text-sm font-medium text-zinc-500">description</p>
@@ -118,9 +204,10 @@ export default function Home() {
   const [docxExportError, setDocxExportError] = useState<string | null>(null);
   const [docxExportResult, setDocxExportResult] = useState<string | null>(null);
 
-  const [modalIssue, setModalIssue] = useState<RedmineIssueResponse | null>(
+  const [modalIssue, setModalIssue] = useState<IssueDetailResponse | null>(
     null,
   );
+  const [reopenFilter, setReopenFilter] = useState<ReopenFilter>("all");
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -134,6 +221,7 @@ export default function Home() {
     setIssueListError(null);
     setIssueList(null);
     setPage(0);
+    setReopenFilter("all");
 
     try {
       const params = new URLSearchParams({ month: targetMonth });
@@ -275,7 +363,7 @@ export default function Home() {
         return;
       }
 
-      setModalIssue(body as RedmineIssueResponse);
+      setModalIssue(body as IssueDetailResponse);
     } catch (err) {
       setModalError(err instanceof Error ? err.message : "不明なエラーが発生しました");
     } finally {
@@ -287,9 +375,18 @@ export default function Home() {
   const total = allIssues.length;
   const closedCount = allIssues.filter((i) => i.is_closed === true).length;
   const openCount = allIssues.filter((i) => i.is_closed === false).length;
-  const pageCount = Math.max(1, Math.ceil(total / ISSUE_LIST_PAGE_SIZE));
+  const reopenedCount = allIssues.filter((i) => i.reopen_signal === "reopened").length;
+  const updatedAfterCloseCount = allIssues.filter(
+    (i) => i.reopen_signal === "updated_after_close",
+  ).length;
+  const visibleIssues =
+    reopenFilter === "all"
+      ? allIssues
+      : allIssues.filter((i) => i.reopen_signal === reopenFilter);
+  const visibleTotal = visibleIssues.length;
+  const pageCount = Math.max(1, Math.ceil(visibleTotal / ISSUE_LIST_PAGE_SIZE));
   const start = page * ISSUE_LIST_PAGE_SIZE;
-  const pageIssues = allIssues.slice(start, start + ISSUE_LIST_PAGE_SIZE);
+  const pageIssues = visibleIssues.slice(start, start + ISSUE_LIST_PAGE_SIZE);
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black lg:flex-row lg:justify-center">
@@ -426,15 +523,41 @@ export default function Home() {
                 <p className="text-xs text-zinc-500">
                   {issueListMonth} に作成・更新: {total}件（クローズ {closedCount}件 / 進行中 {openCount}件
                   {total - closedCount - openCount > 0 && ` / 判定不可 ${total - closedCount - openCount}件`}）
-                  {total > 0 && `　${start + 1}〜${start + pageIssues.length}件を表示`}
+                  {visibleTotal > 0 && `　${start + 1}〜${start + pageIssues.length}件を表示`}
                   （行をダブルクリックで詳細表示）
                 </p>
+                <div role="radiogroup" aria-label="再開の検知で絞り込み" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-black dark:text-zinc-50">
+                  {(
+                    [
+                      ["all", `すべて（${total}）`],
+                      ["reopened", `再開済み（${reopenedCount}）`],
+                      ["updated_after_close", `クローズ後に更新（${updatedAfterCloseCount}）`],
+                    ] as [ReopenFilter, string][]
+                  ).map(([value, label]) => (
+                    <label key={value} className="flex items-center gap-1.5">
+                      <input
+                        type="radio"
+                        name="reopen-filter"
+                        value={value}
+                        checked={reopenFilter === value}
+                        onChange={() => {
+                          setReopenFilter(value);
+                          setPage(0);
+                        }}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
                 {issueList.truncated && (
                   <p className="text-xs text-red-600 dark:text-red-400">
                     件数が上限に達したため、一部のチケットは表示されていません。
                   </p>
                 )}
-                {total > 0 && (
+                {reopenFilter !== "all" && visibleTotal === 0 && (
+                  <p className="text-sm text-zinc-500">該当するチケットはありません。</p>
+                )}
+                {visibleTotal > 0 && (
                   <ul className="flex flex-col divide-y divide-black/[.08] rounded border border-black/[.1] dark:divide-white/[.1] dark:border-white/[.15]">
                     {pageIssues.map((i) => (
                       <li key={i.id}>
@@ -443,7 +566,10 @@ export default function Home() {
                           onDoubleClick={() => handleOpenIssueModal(i.id)}
                           className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-black/[.03] dark:hover:bg-white/[.06]"
                         >
-                          <ClosedBadge isClosed={i.is_closed} />
+                          <span className="flex shrink-0 flex-col items-start gap-1">
+                            <ClosedBadge isClosed={i.is_closed} />
+                            <ReopenBadge signal={i.reopen_signal} />
+                          </span>
                           <span className="flex min-w-0 flex-col gap-0.5">
                             <span className="text-black dark:text-zinc-50">
                               #{i.id} {i.subject}
@@ -522,7 +648,7 @@ export default function Home() {
 
           {modalIssue && (
             <>
-              <IssueDetailView issue={modalIssue.issue} />
+              <IssueDetailView detail={modalIssue} />
               <details>
                 <summary className="cursor-pointer text-sm text-zinc-500">
                   生JSONレスポンス

@@ -1,7 +1,9 @@
 import type { NextRequest } from "next/server";
-import { getIssue } from "@/lib/redmine";
+import { getIssue, getIssueStatuses } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
 import { readConnection } from "@/lib/connection";
+import { analyzeReopen } from "@/lib/reopen";
+import type { IssueDetailResponse } from "@/lib/issue-list";
 
 export async function GET(
   req: NextRequest,
@@ -20,8 +22,26 @@ export async function GET(
   if (conn instanceof Response) return conn;
 
   try {
-    const result = await getIssue(id, conn);
-    return Response.json(result);
+    const [result, statuses] = await Promise.all([
+      getIssue(id, conn),
+      // ステータス一覧は再開判定の補助にのみ使うため、取得できなくても詳細表示は続ける
+      getIssueStatuses(conn).catch((err) => {
+        console.error("Redmine issue status fetch failed:", err);
+        return null;
+      }),
+    ]);
+    const issue = result.issue;
+    const isClosed =
+      issue.status.is_closed ??
+      statuses?.find((s) => s.id === issue.status.id)?.is_closed ??
+      null;
+
+    const body: IssueDetailResponse = {
+      ...result,
+      is_closed: isClosed,
+      reopen: analyzeReopen({ ...issue, is_closed: isClosed }, statuses),
+    };
+    return Response.json(body);
   } catch (err) {
     return redmineErrorResponse(err, "Redmine issue fetch failed", {
       404: "チケットが見つかりません（HTTP 404）。IDが存在しないか、閲覧権限がない可能性があります。",
