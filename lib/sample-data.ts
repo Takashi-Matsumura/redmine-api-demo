@@ -162,8 +162,25 @@ function journal(
   user: RedmineNamed,
   createdOn: string,
   privateNotes = false,
+  statusChange?: [from: number, to: number],
 ): RedmineJournal {
-  return { id: nextJournalId++, notes, user, created_on: createdOn, private_notes: privateNotes };
+  return {
+    id: nextJournalId++,
+    notes,
+    user,
+    created_on: createdOn,
+    private_notes: privateNotes,
+    details: statusChange
+      ? [
+          {
+            property: "attr",
+            name: "status_id",
+            old_value: String(statusChange[0]),
+            new_value: String(statusChange[1]),
+          },
+        ]
+      : [],
+  };
 }
 
 function status(id: number): RedmineNamed {
@@ -178,6 +195,8 @@ interface IssueSeed {
   statusId: number;
   createdOn: string;
   updatedOn: string;
+  /** 最後にクローズした日時。省略時はクローズ済みなら updatedOn、未完了なら null（一度もクローズしていない）。 */
+  closedOn?: string | null;
   journals?: RedmineJournal[];
   attachments?: RedmineAttachment[];
 }
@@ -195,6 +214,12 @@ function buildIssue(seed: IssueSeed): RedmineIssue {
     assigned_to: seed.id % 7 === 0 ? undefined : pick(USERS, seed.id + 4),
     created_on: seed.createdOn,
     updated_on: seed.updatedOn,
+    closed_on:
+      seed.closedOn !== undefined
+        ? seed.closedOn
+        : STATUSES.find((s) => s.id === seed.statusId)!.is_closed
+          ? seed.updatedOn
+          : null,
     journals: seed.journals ?? [],
     attachments: seed.attachments ?? [],
   };
@@ -212,7 +237,7 @@ function genericIssue(id: number, offset: number, index: number): RedmineIssue {
     journal(`確認しました。${assignee.name}で対応します。`, assignee, createdOn),
   ];
   if (STATUSES.find((s) => s.id === statusId)!.is_closed) {
-    journals.push(journal("対応が完了したためクローズします。", author, updatedOn));
+    journals.push(journal("対応が完了したためクローズします。", author, updatedOn, false, [2, statusId]));
   }
   const attachments =
     index % 5 === 0
@@ -338,6 +363,45 @@ function specialIssues(): RedmineIssue[] {
       statusId: 5,
       createdOn: c,
       updatedOn: u,
+    }),
+    buildIssue({
+      id: 9011,
+      subject: "【サンプル】クローズ後に再開されたチケット",
+      description: "一度「終了」にした後、不具合の再発で「進行中」に戻したチケット。closed_on が残っているため「再開済み」と判定される。",
+      statusId: 2,
+      createdOn: c,
+      updatedOn: at(-1, 18),
+      closedOn: at(-1, 10),
+      journals: [
+        journal("修正をリリースしたのでクローズします。", yamada, at(-1, 10), false, [2, 5]),
+        journal("同じ現象が再発しました。再開します。", sato, at(-1, 18), false, [5, 2]),
+      ],
+    }),
+    buildIssue({
+      id: 9012,
+      subject: "【サンプル】クローズ後にコメントが付いたチケット",
+      description: "「終了」のままだが、クローズ後に問い合わせのコメントが付いている。「クローズ後に更新あり」と判定される（再開の兆候）。",
+      statusId: 5,
+      createdOn: c,
+      updatedOn: at(-1, 22),
+      closedOn: at(-1, 8),
+      journals: [
+        journal("対応完了のためクローズします。", yamada, at(-1, 8), false, [3, 5]),
+        journal("別の画面でも同じ現象が出ているようです。確認をお願いします。", sato, at(-1, 22)),
+      ],
+    }),
+    buildIssue({
+      id: 9013,
+      subject: "【サンプル】再開後に再びクローズされたチケット",
+      description: "クローズ→再開→クローズを経たチケット。現在は通常のクローズだが、詳細の「ステータス変更履歴」で再開1回が分かる。",
+      statusId: 5,
+      createdOn: c,
+      updatedOn: at(-1, 16),
+      journals: [
+        journal("クローズします。", yamada, at(-1, 6), false, [2, 5]),
+        journal("確認漏れがあったため再開します。", sato, at(-1, 9), false, [5, 4]),
+        journal("確認できたので改めてクローズします。", yamada, at(-1, 16), false, [4, 5]),
+      ],
     }),
     buildIssue({
       id: 9009,
