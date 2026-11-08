@@ -5,6 +5,7 @@ import {
   downloadAttachment,
   getIssuesCreatedOrUpdated,
   getIssuesDetailed,
+  isValidRedmineId,
   type RedmineIssue,
 } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
@@ -16,8 +17,10 @@ import { sanitizeFileName, UniqueNamer } from "@/lib/filename";
 // 添付ファイルのダウンロードを含むため、既定のタイムアウトに触れないようにする。
 export const maxDuration = 300;
 
-/** 1回のエクスポートで取得する添付ファイルの合計サイズ上限（1GB）。 */
+/** 1回のエクスポートで取得する添付ファイルの合計サイズ上限（1GB）。実際に受信したバイト数で数える。 */
 const MAX_TOTAL_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
+/** 1回のエクスポートで取得する添付ファイルの件数上限。 */
+const MAX_ATTACHMENT_COUNT = 5000;
 const ISSUE_CONCURRENCY = 4;
 /** docx ファイル名に入れる件名の最大文字数（SharePoint のパス長制限への配慮）。 */
 const SUBJECT_MAX_LENGTH = 50;
@@ -63,18 +66,24 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // 一覧の応答に正の整数でない ID が含まれていれば、取得に失敗したものとして扱う
+    const invalidIdCount = summaries.filter((s) => !isValidRedmineId(s.id)).length;
     const { issues, failures } = await getIssuesDetailed(
       conn,
-      summaries.map((s) => s.id),
+      summaries.map((s) => s.id).filter(isValidRedmineId),
       { include: ["journals", "attachments"] },
     );
 
     const rootFolder = `redmine-${month}`;
     const zip = new JSZip();
+    /** 取得中の分（上限まで確保した量）と取得済みの分（実際のバイト数）の合計。 */
     let reservedBytes = 0;
+    let attachmentCount = 0;
     let skippedAttachments = 0;
 
     async function addIssue(issue: RedmineIssue): Promise<void> {
+      // getIssuesDetailed で要求した ID と一致することを確認済みだが、パスに使う前に念のため再確認する
+      if (!isValidRedmineId(issue.id)) return;
       const folder = `${rootFolder}/${issue.id}`;
       const namer = new UniqueNamer();
       const docxName = namer.take(
@@ -87,7 +96,26 @@ export async function GET(req: NextRequest) {
 
       const entries: AttachmentEntry[] = [];
       for (const attachment of issue.attachments ?? []) {
-        if (attachment.filesize > DEFAULT_MAX_ATTACHMENT_BYTES) {
+        // 申告サイズは Redmine の応答なので信用しない。判定の目安にだけ使い、実際の上限は受信バイト数で守る
+        const declaredSize =
+          typeof attachment.filesize === "number" && Number.isFinite(attachment.filesize) && attachment.filesize >= 0
+            ? attachment.filesize
+            : 0;
+
+        if (!isValidRedmineId(attachment.id)) {
+          entries.push({ attachment, skippedReason: "添付IDが不正" });
+          skippedAttachments += 1;
+          continue;
+        }
+        if (attachmentCount >= MAX_ATTACHMENT_COUNT) {
+          entries.push({
+            attachment,
+            skippedReason: `エクスポート全体の件数上限（${MAX_ATTACHMENT_COUNT}件）超過`,
+          });
+          skippedAttachments += 1;
+          continue;
+        }
+        if (declaredSize > DEFAULT_MAX_ATTACHMENT_BYTES) {
           entries.push({
             attachment,
             skippedReason: `1ファイルの上限（${formatBytes(DEFAULT_MAX_ATTACHMENT_BYTES)}）超過`,
@@ -95,7 +123,8 @@ export async function GET(req: NextRequest) {
           skippedAttachments += 1;
           continue;
         }
-        if (reservedBytes + attachment.filesize > MAX_TOTAL_ATTACHMENT_BYTES) {
+        const remaining = MAX_TOTAL_ATTACHMENT_BYTES - reservedBytes;
+        if (declaredSize > remaining || remaining <= 0) {
           entries.push({
             attachment,
             skippedReason: `エクスポート全体の上限（${formatBytes(MAX_TOTAL_ATTACHMENT_BYTES)}）超過`,
@@ -104,17 +133,23 @@ export async function GET(req: NextRequest) {
           continue;
         }
 
-        // 並行実行中の他チケットと合わせて上限を超えないよう、取得前にサイズを確保する
-        reservedBytes += attachment.filesize;
+        // 受信できる最大量（1ファイルの上限と全体の残りの小さい方）を取得前に確保する。
+        // 申告サイズより大きなデータが返されても、確保した量を超えた時点で受信を打ち切るため、
+        // 並行実行中の他チケットと合わせても全体の上限を超えない。
+        const allowance = Math.min(DEFAULT_MAX_ATTACHMENT_BYTES, remaining);
+        reservedBytes += allowance;
+        attachmentCount += 1;
         try {
-          const data = await downloadAttachment(attachment.id, conn);
+          const data = await downloadAttachment(attachment.id, conn, { maxBytes: allowance });
+          // 確保した量のうち、実際に受信しなかった分を戻す
+          reservedBytes -= allowance - data.length;
           const zipName = namer.take(
             sanitizeFileName(attachment.filename, { fallback: `attachment-${attachment.id}` }),
           );
           zip.file(`${folder}/${zipName}`, data);
           entries.push({ attachment, zipName });
         } catch (err) {
-          reservedBytes -= attachment.filesize;
+          reservedBytes -= allowance;
           const message = err instanceof Error ? err.message : "不明なエラー";
           entries.push({ attachment, skippedReason: `取得失敗（${message}）` });
           skippedAttachments += 1;
@@ -146,6 +181,7 @@ export async function GET(req: NextRequest) {
         "Content-Disposition": `attachment; filename="${rootFolder}.zip"`,
         "X-Export-Issue-Count": String(issues.length),
         "X-Export-Failed-Issues": failures.map((f) => f.id).join(","),
+        "X-Export-Invalid-Issues": String(invalidIdCount),
         "X-Export-Skipped-Attachments": String(skippedAttachments),
         "X-Export-Truncated": truncated ? "1" : "0",
       },

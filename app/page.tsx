@@ -192,6 +192,10 @@ export default function Home() {
       const truncated = res.headers.get("X-Export-Truncated") === "1";
 
       const lines = [`クローズ済みチケット ${issueCount}件をエクスポートしました。`];
+      const invalid = Number(res.headers.get("X-Export-Invalid-Issues") ?? "0");
+      if (invalid > 0) {
+        lines.push(`IDが不正なため除外したチケット: ${invalid}件`);
+      }
       if (failed.length > 0) {
         lines.push(`取得に失敗したチケット（Zipに含まれていません）: ${failed.map((id) => `#${id}`).join(", ")}`);
       }
