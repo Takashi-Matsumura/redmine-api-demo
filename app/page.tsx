@@ -1,12 +1,29 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type {
-  RedmineIssue,
-  RedmineIssueListResponse,
-  RedmineIssueResponse,
-} from "@/lib/redmine";
-import { monthToDateRange, currentMonthValue } from "@/lib/month";
+import type { RedmineIssue, RedmineIssueResponse } from "@/lib/redmine";
+import type { IssueListItem, IssueListResponse } from "@/lib/issue-list";
+import { currentMonthValue } from "@/lib/month";
+
+/** 一覧の各行に出す、クローズ済み／進行中の区別。 */
+function ClosedBadge({ isClosed }: { isClosed: IssueListItem["is_closed"] }) {
+  if (isClosed === null) {
+    return (
+      <span className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 dark:border-zinc-600">
+        判定不可
+      </span>
+    );
+  }
+  return isClosed ? (
+    <span className="shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200">
+      クローズ
+    </span>
+  ) : (
+    <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-950 dark:text-blue-200">
+      進行中
+    </span>
+  );
+}
 
 /** チケット詳細（ステータス・担当者・説明・journalsのnotes）の表示。詳細ダイアログで使う。 */
 function IssueDetailView({ issue }: { issue: RedmineIssue }) {
@@ -78,14 +95,18 @@ export default function Home() {
 
   const [targetMonth, setTargetMonth] = useState(currentMonthValue);
   const [closedOnly, setClosedOnly] = useState(true);
-  const [issueList, setIssueList] = useState<RedmineIssueListResponse | null>(
-    null,
-  );
+  const [issueList, setIssueList] = useState<IssueListResponse | null>(null);
+  const [issueListMonth, setIssueListMonth] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
   const [issueListLoading, setIssueListLoading] = useState(false);
   const [issueListError, setIssueListError] = useState<string | null>(null);
 
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  const [docxExportLoading, setDocxExportLoading] = useState(false);
+  const [docxExportError, setDocxExportError] = useState<string | null>(null);
+  const [docxExportResult, setDocxExportResult] = useState<string | null>(null);
 
   const [modalIssue, setModalIssue] = useState<RedmineIssueResponse | null>(
     null,
@@ -96,26 +117,16 @@ export default function Home() {
 
   const ISSUE_LIST_PAGE_SIZE = 100;
 
-  async function fetchIssueList(offset: number) {
-    if (!redmineUrl || !apiKey) return;
-
-    const range = monthToDateRange(targetMonth);
-    if (!range) {
-      setIssueListError("対象月を選択してください");
-      return;
-    }
+  async function handleFetchIssueList() {
+    if (!redmineUrl || !apiKey || !targetMonth) return;
 
     setIssueListLoading(true);
     setIssueListError(null);
+    setIssueList(null);
+    setPage(0);
 
     try {
-      const params = new URLSearchParams({
-        limit: String(ISSUE_LIST_PAGE_SIZE),
-        offset: String(offset),
-        created_on_from: range.from,
-        created_on_to: range.to,
-        closed_only: closedOnly ? "1" : "0",
-      });
+      const params = new URLSearchParams({ month: targetMonth });
       const res = await fetch(`/api/issues?${params.toString()}`, {
         headers: {
           "X-Redmine-Url": redmineUrl,
@@ -129,7 +140,8 @@ export default function Home() {
         return;
       }
 
-      setIssueList(body as RedmineIssueListResponse);
+      setIssueList(body as IssueListResponse);
+      setIssueListMonth(targetMonth);
     } catch (err) {
       setIssueListError(
         err instanceof Error ? err.message : "不明なエラーが発生しました",
@@ -139,19 +151,61 @@ export default function Home() {
     }
   }
 
-  function handleFetchIssueList() {
-    setIssueList(null);
-    fetchIssueList(0);
-  }
+  async function handleExportDocxZip() {
+    if (!redmineUrl || !apiKey || !targetMonth) return;
 
-  function handlePrevPage() {
-    if (!issueList) return;
-    fetchIssueList(Math.max(0, issueList.offset - ISSUE_LIST_PAGE_SIZE));
-  }
+    setDocxExportLoading(true);
+    setDocxExportError(null);
+    setDocxExportResult(null);
 
-  function handleNextPage() {
-    if (!issueList) return;
-    fetchIssueList(issueList.offset + issueList.issues.length);
+    try {
+      const params = new URLSearchParams({ month: targetMonth });
+      const res = await fetch(`/api/export-docx?${params.toString()}`, {
+        headers: {
+          "X-Redmine-Url": redmineUrl,
+          "X-Redmine-Api-Key": apiKey,
+        },
+      });
+
+      if (!res.ok) {
+        const body = await res.json();
+        setDocxExportError(body.error ?? `エクスポートに失敗しました（HTTP ${res.status}）`);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `redmine-${targetMonth}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      const issueCount = res.headers.get("X-Export-Issue-Count") ?? "?";
+      const failed = (res.headers.get("X-Export-Failed-Issues") ?? "")
+        .split(",")
+        .filter(Boolean);
+      const skipped = Number(res.headers.get("X-Export-Skipped-Attachments") ?? "0");
+      const truncated = res.headers.get("X-Export-Truncated") === "1";
+
+      const lines = [`クローズ済みチケット ${issueCount}件をエクスポートしました。`];
+      if (failed.length > 0) {
+        lines.push(`取得に失敗したチケット（Zipに含まれていません）: ${failed.map((id) => `#${id}`).join(", ")}`);
+      }
+      if (skipped > 0) {
+        lines.push(`取得できなかった添付ファイル: ${skipped}件（各チケットの docx に理由を記載しています）`);
+      }
+      if (truncated) {
+        lines.push("件数が上限に達したため、一部のチケットは含まれていません。");
+      }
+      setDocxExportResult(lines.join("\n"));
+    } catch (err) {
+      setDocxExportError(
+        err instanceof Error ? err.message : "不明なエラーが発生しました",
+      );
+    } finally {
+      setDocxExportLoading(false);
+    }
   }
 
   async function handleExportMarkdown() {
@@ -222,6 +276,14 @@ export default function Home() {
     }
   }
 
+  const allIssues = issueList?.issues ?? [];
+  const total = allIssues.length;
+  const closedCount = allIssues.filter((i) => i.is_closed === true).length;
+  const openCount = allIssues.filter((i) => i.is_closed === false).length;
+  const pageCount = Math.max(1, Math.ceil(total / ISSUE_LIST_PAGE_SIZE));
+  const start = page * ISSUE_LIST_PAGE_SIZE;
+  const pageIssues = allIssues.slice(start, start + ISSUE_LIST_PAGE_SIZE);
+
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black lg:flex-row lg:justify-center">
       <main className="flex w-full max-w-2xl flex-col gap-6 px-6 py-16 lg:mx-auto">
@@ -272,6 +334,14 @@ export default function Home() {
               </button>
               <button
                 type="button"
+                onClick={handleExportDocxZip}
+                disabled={docxExportLoading || !redmineUrl || !apiKey || !targetMonth}
+                className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
+              >
+                {docxExportLoading ? "エクスポート中..." : "クローズ済みをdocx(Zip)でエクスポート"}
+              </button>
+              <button
+                type="button"
                 onClick={handleExportMarkdown}
                 disabled={exportLoading || !redmineUrl || !apiKey || !targetMonth}
                 className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
@@ -287,8 +357,11 @@ export default function Home() {
               checked={closedOnly}
               onChange={(e) => setClosedOnly(e.target.checked)}
             />
-            完了（クローズ）済みのみ（一覧・エクスポート共通）
+            MDエクスポートは完了（クローズ）済みのみ（起票日が対象月のチケットが対象）
           </label>
+          <p className="text-xs text-zinc-500">
+            一覧は、対象月に作成または更新されたチケットを全ステータス表示します。docx(Zip)エクスポートはそのうちクローズ済みのチケットのみを、チケットごとの docx と添付ファイルにまとめます。
+          </p>
 
           {(!redmineUrl || !apiKey) && (
             <p className="text-xs text-zinc-500">
@@ -302,6 +375,18 @@ export default function Home() {
             </p>
           )}
 
+          {docxExportError && (
+            <p className="whitespace-pre-wrap rounded border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+              {docxExportError}
+            </p>
+          )}
+
+          {docxExportResult && (
+            <p className="whitespace-pre-wrap rounded border border-green-400 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
+              {docxExportResult}
+            </p>
+          )}
+
           {exportError && (
             <p className="whitespace-pre-wrap rounded border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
               {exportError}
@@ -309,60 +394,66 @@ export default function Home() {
           )}
 
           {issueList && (
-            <>
-              <p className="text-xs text-zinc-500">
-                {issueList.total_count}件中 {issueList.offset + 1}〜
-                {issueList.offset + issueList.issues.length}
-                件を表示（行をダブルクリックで詳細表示。MDエクスポートはページに関わらず全件を含みます）
-              </p>
-              <ul className="flex flex-col divide-y divide-black/[.08] rounded border border-black/[.1] dark:divide-white/[.1] dark:border-white/[.15]">
-                {issueList.issues.map((i) => (
-                  <li key={i.id}>
+              <>
+                <p className="text-xs text-zinc-500">
+                  {issueListMonth} に作成・更新: {total}件（クローズ {closedCount}件 / 進行中 {openCount}件
+                  {total - closedCount - openCount > 0 && ` / 判定不可 ${total - closedCount - openCount}件`}）
+                  {total > 0 && `　${start + 1}〜${start + pageIssues.length}件を表示`}
+                  （行をダブルクリックで詳細表示）
+                </p>
+                {issueList.truncated && (
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    件数が上限に達したため、一部のチケットは表示されていません。
+                  </p>
+                )}
+                {total > 0 && (
+                  <ul className="flex flex-col divide-y divide-black/[.08] rounded border border-black/[.1] dark:divide-white/[.1] dark:border-white/[.15]">
+                    {pageIssues.map((i) => (
+                      <li key={i.id}>
+                        <button
+                          type="button"
+                          onDoubleClick={() => handleOpenIssueModal(i.id)}
+                          className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-black/[.03] dark:hover:bg-white/[.06]"
+                        >
+                          <ClosedBadge isClosed={i.is_closed} />
+                          <span className="flex min-w-0 flex-col gap-0.5">
+                            <span className="text-black dark:text-zinc-50">
+                              #{i.id} {i.subject}
+                            </span>
+                            <span className="text-xs text-zinc-500">
+                              {i.project.name} / {i.tracker.name} / {i.status.name} / 作成 {i.created_on.slice(0, 10)} / 更新 {i.updated_on.slice(0, 10)}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {pageCount > 1 && (
+                  <div className="flex items-center justify-between gap-2">
                     <button
                       type="button"
-                      onDoubleClick={() => handleOpenIssueModal(i.id)}
-                      className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-black/[.03] dark:hover:bg-white/[.06]"
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      disabled={page === 0}
+                      className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
                     >
-                      <span className="text-black dark:text-zinc-50">
-                        #{i.id} {i.subject}
-                      </span>
-                      <span className="text-xs text-zinc-500">
-                        {i.project.name} / {i.tracker.name} / {i.status.name}
-                      </span>
+                      前へ
                     </button>
-                  </li>
-                ))}
-              </ul>
-
-              {issueList.total_count > issueList.issues.length && (
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePrevPage}
-                    disabled={issueListLoading || issueList.offset === 0}
-                    className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
-                  >
-                    前へ
-                  </button>
-                  <span className="text-xs text-zinc-500">
-                    {Math.floor(issueList.offset / ISSUE_LIST_PAGE_SIZE) + 1} /{" "}
-                    {Math.ceil(issueList.total_count / ISSUE_LIST_PAGE_SIZE)} ページ
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleNextPage}
-                    disabled={
-                      issueListLoading ||
-                      issueList.offset + issueList.issues.length >=
-                        issueList.total_count
-                    }
-                    className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
-                  >
-                    次へ
-                  </button>
-                </div>
-              )}
-            </>
+                    <span className="text-xs text-zinc-500">
+                      {page + 1} / {pageCount} ページ
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                      disabled={page >= pageCount - 1}
+                      className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
+                    >
+                      次へ
+                    </button>
+                  </div>
+                )}
+              </>
           )}
         </div>
       </main>
@@ -376,7 +467,7 @@ export default function Home() {
             上のRedmine URLとAPIキーを実環境の値で入力する。
           </li>
           <li>
-            対象月を選び「一覧を取得」をクリックし、実際のRedmine画面でその月に起票されたチケット一覧と件数が一致するか確認する。
+            対象月を選び「一覧を取得」をクリックし、実際のRedmine画面で「作成日がその月」または「更新日がその月」のチケットと件数が一致するか確認する（Redmine画面では2つの条件で別々に絞り込み、重複を除いて合算する）。
           </li>
           <li>
             一覧の行をダブルクリックし、ダイアログに表示された詳細（ステータス・担当者・説明・journalsのnotes）が実際のRedmine画面と一致するか確認する。
@@ -388,10 +479,16 @@ export default function Home() {
             ダイアログ内の「生JSONレスポンス」を開き、想定外のフィールドや欠落がないか確認する。
           </li>
           <li>
-            「完了（クローズ）済みのみ」をON/OFFして一覧の件数が変わることを確認し、ON時の件数が実際のRedmine画面で同条件（起票日がその月かつステータスが終了系）に絞った件数と一致するか確認する。
+            一覧の「クローズ」「進行中」の表示が、Redmine のステータス設定（「終了したチケット」にチェックがあるか）と一致するか確認する。
           </li>
           <li>
             101件以上ある月で「次へ」「前へ」を操作し、ページが重複・欠落なく切り替わること（表示範囲の件数表示と実際の行数が一致すること）を確認する。
+          </li>
+          <li>
+            「クローズ済みをdocx(Zip)でエクスポート」で取得したZipを展開し、チケットIDのフォルダ数が一覧の「クローズ」件数と一致するか確認する。
+          </li>
+          <li>
+            添付ファイルのあるチケットのフォルダを開き、添付ファイルが docx と同じ場所にすべて揃っていること、Word で docx を開いて内容（説明・コメント・添付一覧）が Redmine 画面と一致することを確認する。
           </li>
           <li>
             「MDでエクスポート」でダウンロードしたファイルの front matter の issue_count が、同条件で一覧取得した total_count と一致するか確認する（101件以上ある月は特に）。

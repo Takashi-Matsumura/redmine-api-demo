@@ -5,8 +5,8 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
 /**
- * Redmine REST API との疎通確認用の最小クライアント。
- * 一覧取得・ページング・キャッシュは扱わない。チケット1件の取得のみ。
+ * Redmine REST API クライアント。
+ * チケット一覧・詳細・ステータス一覧の取得と、添付ファイルのダウンロードを扱う。
  */
 
 export interface RedmineNamed {
@@ -23,27 +23,45 @@ export interface RedmineJournal {
   private_notes?: boolean;
 }
 
+export interface RedmineAttachment {
+  id: number;
+  filename: string;
+  filesize: number;
+  content_type?: string;
+  description?: string;
+  /** Redmine が返すダウンロードURL。接続先検証のため使わず、ID からURLを組み立てる。 */
+  content_url?: string;
+  author?: RedmineNamed;
+  created_on: string;
+}
+
+/** チケットのステータス。is_closed は Redmine 5.1 以降のみ issue 内に含まれる。 */
+export interface RedmineIssueStatusRef extends RedmineNamed {
+  is_closed?: boolean;
+}
+
 export interface RedmineIssue {
   id: number;
   subject: string;
   description?: string;
   project: RedmineNamed;
   tracker: RedmineNamed;
-  status: RedmineNamed;
+  status: RedmineIssueStatusRef;
   priority: RedmineNamed;
   author: RedmineNamed;
   assigned_to?: RedmineNamed;
   created_on: string;
   updated_on: string;
   journals?: RedmineJournal[];
+  attachments?: RedmineAttachment[];
 }
 
 export interface RedmineIssueResponse {
   issue: RedmineIssue;
 }
 
-/** 一覧に含まれるチケット。journals は一覧取得時には含まれない。 */
-export type RedmineIssueSummary = Omit<RedmineIssue, "journals">;
+/** 一覧に含まれるチケット。journals / attachments は一覧取得時には含まれない。 */
+export type RedmineIssueSummary = Omit<RedmineIssue, "journals" | "attachments">;
 
 export interface RedmineIssueListResponse {
   issues: RedmineIssueSummary[];
@@ -62,6 +80,9 @@ export interface RedmineIssueListParams {
   /** 起票日（created_on）の範囲フィルタ。両方指定時のみ有効。YYYY-MM-DD形式。 */
   createdOnFrom?: string;
   createdOnTo?: string;
+  /** 更新日（updated_on）の範囲フィルタ。両方指定時のみ有効。YYYY-MM-DD形式。 */
+  updatedOnFrom?: string;
+  updatedOnTo?: string;
   /**
    * true の場合、クローズ済み（終了系）ステータスのみに絞る。
    * createdOnFrom/createdOnTo と同じ f[]/op[]/v[] 形式で指定する必要がある。
@@ -166,7 +187,7 @@ const REQUEST_TIMEOUT_MS = 15000;
 
 interface PinnedResponse {
   status: number;
-  body: string;
+  body: Buffer;
 }
 
 /**
@@ -179,6 +200,7 @@ function pinnedRequest(
   target: URL,
   address: string,
   headers: Record<string, string>,
+  maxBytes: number = MAX_RESPONSE_BYTES,
 ): Promise<PinnedResponse> {
   return new Promise((resolve, reject) => {
     const isHttps = target.protocol === "https:";
@@ -201,7 +223,7 @@ function pinnedRequest(
 
         res.on("data", (chunk: Buffer) => {
           total += chunk.length;
-          if (total > MAX_RESPONSE_BYTES) {
+          if (total > maxBytes) {
             req.destroy(new Error("Redmine からの応答が大きすぎます"));
             return;
           }
@@ -211,7 +233,7 @@ function pinnedRequest(
         res.on("end", () => {
           resolve({
             status: res.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString("utf-8"),
+            body: Buffer.concat(chunks),
           });
         });
       },
@@ -225,26 +247,95 @@ function pinnedRequest(
   });
 }
 
-/** チケット1件を journals 込みで取得する。 */
+/** 入力された Redmine URL の末尾スラッシュを除いたベースURL（サブディレクトリ運用を考慮）。 */
+function redmineBase(parsed: URL): string {
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+}
+
+function assertOk(res: PinnedResponse): void {
+  if (res.status < 200 || res.status >= 300) {
+    throw new RedmineApiError(res.status, res.body.toString("utf-8"));
+  }
+}
+
+/** チケット1件を取得する。既定では journals を含める。 */
 export async function getIssue(
   id: string,
   { redmineUrl, apiKey }: RedmineConnection,
+  opts?: { include?: ("journals" | "attachments")[] },
 ): Promise<RedmineIssueResponse> {
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
+  const include = (opts?.include ?? ["journals"]).join(",");
   const target = new URL(
-    `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}/issues/${id}.json?include=journals`,
+    `${redmineBase(parsed)}/issues/${encodeURIComponent(id)}.json?include=${include}`,
   );
 
   const res = await pinnedRequest(target, address, {
     "X-Redmine-API-Key": apiKey,
     Accept: "application/json",
   });
+  assertOk(res);
 
-  if (res.status < 200 || res.status >= 300) {
-    throw new RedmineApiError(res.status, res.body);
-  }
+  return JSON.parse(res.body.toString("utf-8")) as RedmineIssueResponse;
+}
 
-  return JSON.parse(res.body) as RedmineIssueResponse;
+export interface RedmineIssueStatus {
+  id: number;
+  name: string;
+  is_closed: boolean;
+}
+
+/** ステータス一覧（終了系かどうか＝is_closed を含む）を取得する。 */
+export async function getIssueStatuses({
+  redmineUrl,
+  apiKey,
+}: RedmineConnection): Promise<RedmineIssueStatus[]> {
+  const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
+  const target = new URL(`${redmineBase(parsed)}/issue_statuses.json`);
+
+  const res = await pinnedRequest(target, address, {
+    "X-Redmine-API-Key": apiKey,
+    Accept: "application/json",
+  });
+  assertOk(res);
+
+  const body = JSON.parse(res.body.toString("utf-8")) as {
+    issue_statuses: { id: number; name: string; is_closed?: boolean }[];
+  };
+  return body.issue_statuses.map((s) => ({
+    id: s.id,
+    name: s.name,
+    is_closed: Boolean(s.is_closed),
+  }));
+}
+
+/** 添付ファイル1件の既定サイズ上限（100MB）。 */
+export const DEFAULT_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+
+/**
+ * 添付ファイルの本体をダウンロードする。
+ * SSRF 対策として、Redmine が返す content_url（別ホストを指しうる）は使わず、
+ * 入力された Redmine URL と添付ID から `/attachments/download/:id` を組み立てる。
+ * リダイレクトは追わない（ログイン画面等へのリダイレクトはエラーとして扱う）。
+ */
+export async function downloadAttachment(
+  attachmentId: number,
+  { redmineUrl, apiKey }: RedmineConnection,
+  opts?: { maxBytes?: number },
+): Promise<Buffer> {
+  const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
+  const target = new URL(
+    `${redmineBase(parsed)}/attachments/download/${encodeURIComponent(String(attachmentId))}`,
+  );
+
+  const res = await pinnedRequest(
+    target,
+    address,
+    { "X-Redmine-API-Key": apiKey },
+    opts?.maxBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES,
+  );
+  assertOk(res);
+  return res.body;
 }
 
 const DEFAULT_ISSUE_LIST_LIMIT = 25;
@@ -269,13 +360,13 @@ export async function getIssues(
     sort,
     createdOnFrom,
     createdOnTo,
+    updatedOnFrom,
+    updatedOnTo,
     closedOnly,
   }: RedmineIssueListParams = {},
 ): Promise<RedmineIssueListResponse> {
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
-  const target = new URL(
-    `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}/issues.json`,
-  );
+  const target = new URL(`${redmineBase(parsed)}/issues.json`);
 
   const safeLimit = Math.min(
     Math.max(1, limit ?? DEFAULT_ISSUE_LIST_LIMIT),
@@ -287,7 +378,7 @@ export async function getIssues(
   if (projectId) target.searchParams.set("project_id", projectId);
 
   const hasAdvancedFilter = Boolean(
-    (createdOnFrom && createdOnTo) || closedOnly,
+    (createdOnFrom && createdOnTo) || (updatedOnFrom && updatedOnTo) || closedOnly,
   );
   // Redmine は f[] を1つでも渡すと status_id の短縮フィルタを無視するため、
   // f[] を使うリクエストでは status_id を素通しせず f[] 形式に統一する。
@@ -300,6 +391,12 @@ export async function getIssues(
     target.searchParams.append("v[created_on][]", createdOnFrom);
     target.searchParams.append("v[created_on][]", createdOnTo);
   }
+  if (updatedOnFrom && updatedOnTo) {
+    target.searchParams.append("f[]", "updated_on");
+    target.searchParams.set("op[updated_on]", "><");
+    target.searchParams.append("v[updated_on][]", updatedOnFrom);
+    target.searchParams.append("v[updated_on][]", updatedOnTo);
+  }
   if (closedOnly) {
     target.searchParams.append("f[]", "status_id");
     target.searchParams.set("op[status_id]", "c");
@@ -309,12 +406,9 @@ export async function getIssues(
     "X-Redmine-API-Key": apiKey,
     Accept: "application/json",
   });
+  assertOk(res);
 
-  if (res.status < 200 || res.status >= 300) {
-    throw new RedmineApiError(res.status, res.body);
-  }
-
-  return JSON.parse(res.body) as RedmineIssueListResponse;
+  return JSON.parse(res.body.toString("utf-8")) as RedmineIssueListResponse;
 }
 
 const DEFAULT_MAX_EXPORT_ISSUES = 1000;
@@ -353,6 +447,42 @@ export async function getAllIssues(
   return { issues: issues.slice(0, maxIssues), totalCount, truncated };
 }
 
+/**
+ * 対象期間に「作成または更新」されたチケットを全件取得する（id降順）。
+ * Redmine のフィルタは AND 結合のみで OR を指定できないため、
+ * 作成日での絞り込みと更新日での絞り込みを別々に取得し、ID で重複を除いて結合する。
+ */
+export async function getIssuesCreatedOrUpdated(
+  conn: RedmineConnection,
+  range: { from: string; to: string },
+  opts?: { closedOnly?: boolean; maxIssues?: number },
+): Promise<{ issues: RedmineIssueSummary[]; truncated: boolean }> {
+  const closedOnly = opts?.closedOnly ?? false;
+  const maxIssues = opts?.maxIssues ?? DEFAULT_MAX_EXPORT_ISSUES;
+
+  const created = await getAllIssues(
+    conn,
+    { createdOnFrom: range.from, createdOnTo: range.to, closedOnly },
+    { maxIssues },
+  );
+  const updated = await getAllIssues(
+    conn,
+    { updatedOnFrom: range.from, updatedOnTo: range.to, closedOnly },
+    { maxIssues },
+  );
+
+  const byId = new Map<number, RedmineIssueSummary>();
+  for (const issue of [...created.issues, ...updated.issues]) {
+    byId.set(issue.id, issue);
+  }
+  const merged = [...byId.values()].sort((a, b) => b.id - a.id);
+
+  return {
+    issues: merged.slice(0, maxIssues),
+    truncated: created.truncated || updated.truncated || merged.length > maxIssues,
+  };
+}
+
 const DEFAULT_DETAIL_CONCURRENCY = 4;
 
 /**
@@ -363,7 +493,7 @@ const DEFAULT_DETAIL_CONCURRENCY = 4;
 export async function getIssuesDetailed(
   conn: RedmineConnection,
   ids: number[],
-  opts?: { concurrency?: number },
+  opts?: { concurrency?: number; include?: ("journals" | "attachments")[] },
 ): Promise<{
   issues: RedmineIssue[];
   failures: { id: number; message: string }[];
@@ -377,7 +507,7 @@ export async function getIssuesDetailed(
     const id = ids[index];
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await getIssue(String(id), conn);
+        const res = await getIssue(String(id), conn, { include: opts?.include });
         slots[index] = res.issue;
         return;
       } catch (err) {
