@@ -1,6 +1,6 @@
 # redmine-api-demo
 
-Redmine REST API から対象月のチケット一覧・詳細（コメント履歴を含む）を確認できる検証ツール。あわせて、対象月の全チケットを1つのMarkdownファイルとしてエクスポートする機能を持つ。8年分蓄積されたRedmineのチケットをナレッジとして書き出し、GitHub Copilot等に読み込ませる用途を想定している。DB・キャッシュ層、認証機能は持たない。
+Redmine REST API から対象月のチケット一覧・詳細（コメント履歴を含む）を確認できる検証ツール。あわせて、対象月のクローズ済みチケットをチケットごとの docx と添付ファイルにまとめて Zip でエクスポートする機能（SharePoint での管理用）と、対象月の全チケットを1つのMarkdownファイルとしてエクスポートする機能を持つ。8年分蓄積されたRedmineのチケットをナレッジとして書き出し、GitHub Copilot等に読み込ませる用途を想定している。DB・キャッシュ層、認証機能は持たない。
 
 ## 使い方
 
@@ -17,15 +17,38 @@ npm run dev
 
 ### チケット一覧
 
-「チケット一覧」で対象月（例: 2026年8月）を選び「一覧を取得」を押すと、その月に**起票された**チケットが一覧表示される（`sort=id:desc` で新しい順）。「完了（クローズ）済みのみ」チェックボックス（既定ON）で、終了系ステータスのみに絞り込める。
+「チケット一覧」で対象月（例: 2026年8月）を選び「一覧を取得」を押すと、その月に**作成または更新された**チケットが全ステータスで一覧表示される（ID降順）。各行には「クローズ」「進行中」のバッジを表示し、件数の内訳も表示する。
 
-一覧は1ページ100件で、100件を超える場合は「前へ」「次へ」でページ送りできる（総ページ数を表示）。
+- Redmine のフィルタは OR を指定できないため、作成日（`created_on`）での絞り込みと更新日（`updated_on`）での絞り込みを別々に全件取得し、IDで重複を除いて結合している（`lib/redmine.ts` の `getIssuesCreatedOrUpdated()`）。上限は各1000件
+- クローズかどうかは、Redmine 5.1 以降で issue の `status.is_closed` が返る場合はそれを使い、無い場合は `/issue_statuses.json` の `is_closed` で判定する
+
+一覧は1ページ100件で、100件を超える場合は「前へ」「次へ」でページ送りできる（全件を取得したうえで画面側でページ送りする）。
 
 一覧の行を**ダブルクリック**すると、そのチケットの詳細がダイアログで表示される。ダイアログには `id` / `subject` / `project.name` / `tracker.name` / `status.name` / `priority.name` / `author.name` / `assigned_to.name` / `created_on` / `updated_on` / `description` に加え、journals（履歴）のうち notes（コメント）を持つものが**全件**時系列順で表示される。デバッグ用に生のJSONレスポンスをダイアログ内の `<details>` に表示する。ダイアログは「閉じる」ボタンまたは Esc キーで閉じられる。
 
+### docx(Zip)エクスポート
+
+「クローズ済みをdocx(Zip)でエクスポート」を押すと、一覧と同じ条件（対象月に作成または更新）のうち**クローズ済み**のチケットを、次の構成の Zip（`redmine-YYYY-MM.zip`）としてダウンロードする。
+
+```
+redmine-2026-08.zip
+└─ redmine-2026-08/
+   └─ 1234/                              ← チケットID
+      ├─ 1234_ログイン不具合の修正.docx   ← チケットID_件名
+      ├─ エラー画面.png                    ← 添付ファイル（docx と同じ階層）
+      └─ 修正仕様書.xlsx
+```
+
+- docx には、件名・Redmine へのリンク・メタ情報・説明・添付ファイル一覧（保存名/サイズ/登録者/登録日時/説明）・コメント（journals の notes）を載せる。プライベート注記は含めない
+- ファイル名は Windows / SharePoint で使えない文字（`\ / : * ? " < > |` や制御文字）を `_` に置き換え、件名は50文字で切り詰める。同じフォルダ内で名前が重なった場合は `名前 (2).png` のように連番を付ける（大文字小文字は区別しない）
+- 添付ファイルは1件100MB、エクスポート全体で1GBを上限とし、超過分や取得に失敗した分は取得せず、docx の添付一覧に理由を記載する
+- 添付は Redmine が返す `content_url` を使わず、入力された Redmine URL と添付IDから `/attachments/download/:id` を組み立てて取得する（別ホストへの誘導を防ぐため）
+- 終了後、エクスポート件数・取得に失敗したチケット・取得できなかった添付の件数を画面に表示する
+- 1ファイルあたりの容量が大きいため、Zip は無圧縮（格納のみ）で作成する
+
 ### Markdownエクスポート
 
-「MDでエクスポート」を押すと、対象月の条件（起票日の範囲、「完了済みのみ」チェックボックスの状態）に合致する**全チケット**（一覧のページ数に関わらず全件）を1つのMarkdownファイル（`redmine-YYYY-MM.md`）としてダウンロードする。
+「MDでエクスポート」を押すと、対象月の条件（**起票日**の範囲、「MDエクスポートは完了（クローズ）済みのみ」チェックボックスの状態）に合致する**全チケット**（一覧のページ数に関わらず全件）を1つのMarkdownファイル（`redmine-YYYY-MM.md`）としてダウンロードする。
 
 - 各チケットは見出し・メタ情報（プロジェクト/トラッカー/ステータス/優先度/起票者/担当者/日付）・説明・コメント（journalsのnotes）で構成される
 - プライベート注記（`private_notes: true` のjournal）は本文に含めず、除外件数のみ front matter の `excluded_private_notes` に記録する
@@ -44,13 +67,17 @@ npm run dev
 ## 構成
 
 - `app/page.tsx`: 確認用画面（Client Component）。入力フォーム・一覧表示（ページネーション）・詳細ダイアログ・エクスポートボタン
-- `app/api/issues/route.ts`: Route Handler。チケット一覧を取得する。対象月の範囲は `created_on_from`/`created_on_to` パラメータで受け取り Redmine の拡張フィルタ（`f[]=created_on&op[created_on]=><`）に変換する。`closed_only=1` で終了系ステータスに絞り込む（`f[]=status_id&op[status_id]=c`）
+- `app/api/issues/route.ts`: Route Handler。`month=YYYY-MM` で、その月に作成または更新されたチケットを全件返す。各チケットにクローズ済みかどうか（`is_closed`）を付ける
+- `app/api/export-docx/route.ts`: Route Handler。対象月のクローズ済みチケットを、チケットごとの docx と添付ファイルにまとめた Zip として返す
 - `app/api/issue/[id]/route.ts`: Route Handler。チケット1件を journals 込みで取得する
 - `app/api/export/route.ts`: Route Handler。対象月の全チケットを取得し、Markdownとして返す（`Content-Disposition: attachment`）
-- `lib/redmine.ts`: Redmine REST API クライアント（`import "server-only"`）。`getIssues()` / `getIssue()` に加え、全件ページング取得の `getAllIssues()`、チケット詳細の並行取得（失敗を個別集計）を行う `getIssuesDetailed()` を実装
+- `lib/redmine.ts`: Redmine REST API クライアント（`import "server-only"`）。`getIssues()` / `getIssue()` に加え、全件ページング取得の `getAllIssues()`、作成または更新で絞る `getIssuesCreatedOrUpdated()`、チケット詳細の並行取得（失敗を個別集計）を行う `getIssuesDetailed()`、ステータス一覧の `getIssueStatuses()`、添付ファイル取得の `downloadAttachment()` を実装
 - `lib/markdown.ts`: チケット配列をMarkdown文字列に変換する純粋関数（`issuesToMarkdown()`）
+- `lib/docx.ts`: チケット1件を docx に変換する（`issueToDocx()`、`docx` パッケージを使用）
+- `lib/filename.ts`: Zip 内のファイル名を Windows / SharePoint 向けに整える（`sanitizeFileName()`、重複時に連番を付ける `UniqueNamer`）
+- `lib/issue-list.ts`: 一覧APIの応答型（画面からも参照するため `lib/redmine.ts` と分離）
 - `lib/month.ts`: 対象月（`YYYY-MM`）から日付範囲・当月値を求めるヘルパ（クライアント/サーバ両方から利用するため `lib/redmine.ts` から分離）
-- `lib/redmine-response.ts`: 3つのRoute Handlerで共通のRedmineエラー→JSONレスポンス変換
+- `lib/redmine-response.ts`: Route Handler で共通のRedmineエラー→JSONレスポンス変換
 
 ### Redmineのフィルタ仕様に関する注意
 
