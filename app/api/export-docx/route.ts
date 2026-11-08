@@ -5,10 +5,10 @@ import {
   downloadAttachment,
   getIssuesCreatedOrUpdated,
   getIssuesDetailed,
-  type RedmineConnection,
   type RedmineIssue,
 } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
+import { readConnection } from "@/lib/connection";
 import { monthToDateRange } from "@/lib/month";
 import { issueToDocx, type AttachmentEntry } from "@/lib/docx";
 import { sanitizeFileName, UniqueNamer } from "@/lib/filename";
@@ -36,15 +36,9 @@ function formatBytes(bytes: number): string {
  *       └─ <添付ファイル>...
  */
 export async function GET(req: NextRequest) {
-  const redmineUrl = req.headers.get("x-redmine-url")?.trim();
-  const apiKey = req.headers.get("x-redmine-api-key")?.trim();
-
-  if (!redmineUrl || !apiKey) {
-    return Response.json(
-      { error: "Redmine URLとAPIキーを入力してください" },
-      { status: 400 },
-    );
-  }
+  const connOrError = readConnection(req);
+  if (connOrError instanceof Response) return connOrError;
+  const conn = connOrError;
 
   const month = req.nextUrl.searchParams.get("month") ?? "";
   const range = /^\d{4}-\d{2}$/.test(month) ? monthToDateRange(month) : null;
@@ -54,8 +48,6 @@ export async function GET(req: NextRequest) {
       { status: 400 },
     );
   }
-
-  const conn: RedmineConnection = { redmineUrl, apiKey };
 
   try {
     const { issues: summaries, truncated } = await getIssuesCreatedOrUpdated(
@@ -129,7 +121,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const docx = await issueToDocx(issue, { redmineBaseUrl: redmineUrl!, attachments: entries });
+      const docx = await issueToDocx(issue, { redmineBaseUrl: conn.redmineUrl, attachments: entries });
       zip.file(`${folder}/${docxName}`, docx);
     }
 

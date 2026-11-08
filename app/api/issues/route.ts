@@ -1,10 +1,7 @@
 import type { NextRequest } from "next/server";
-import {
-  getIssueStatuses,
-  getIssuesCreatedOrUpdated,
-  type RedmineConnection,
-} from "@/lib/redmine";
+import { getIssueStatuses, getIssuesCreatedOrUpdated } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
+import { readConnection } from "@/lib/connection";
 import { monthToDateRange } from "@/lib/month";
 import type { IssueListItem, IssueListResponse } from "@/lib/issue-list";
 
@@ -13,15 +10,8 @@ import type { IssueListItem, IssueListResponse } from "@/lib/issue-list";
  * 各チケットにはクローズ済みかどうか（is_closed）を付ける。ページ送りは画面側で行う。
  */
 export async function GET(req: NextRequest) {
-  const redmineUrl = req.headers.get("x-redmine-url")?.trim();
-  const apiKey = req.headers.get("x-redmine-api-key")?.trim();
-
-  if (!redmineUrl || !apiKey) {
-    return Response.json(
-      { error: "Redmine URLとAPIキーを入力してください" },
-      { status: 400 },
-    );
-  }
+  const conn = readConnection(req);
+  if (conn instanceof Response) return conn;
 
   const month = req.nextUrl.searchParams.get("month") ?? "";
   const range = /^\d{4}-\d{2}$/.test(month) ? monthToDateRange(month) : null;
@@ -31,8 +21,6 @@ export async function GET(req: NextRequest) {
       { status: 400 },
     );
   }
-
-  const conn: RedmineConnection = { redmineUrl, apiKey };
 
   try {
     const [{ issues, truncated }, statuses] = await Promise.all([

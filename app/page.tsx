@@ -92,6 +92,14 @@ function IssueDetailView({ issue }: { issue: RedmineIssue }) {
 export default function Home() {
   const [redmineUrl, setRedmineUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [useSample, setUseSample] = useState(false);
+  const canFetch = useSample || (Boolean(redmineUrl) && Boolean(apiKey));
+
+  function redmineHeaders(): Record<string, string> {
+    return useSample
+      ? { "X-Redmine-Sample": "1" }
+      : { "X-Redmine-Url": redmineUrl, "X-Redmine-Api-Key": apiKey };
+  }
 
   const [targetMonth, setTargetMonth] = useState(currentMonthValue);
   const [closedOnly, setClosedOnly] = useState(true);
@@ -118,7 +126,7 @@ export default function Home() {
   const ISSUE_LIST_PAGE_SIZE = 100;
 
   async function handleFetchIssueList() {
-    if (!redmineUrl || !apiKey || !targetMonth) return;
+    if (!canFetch || !targetMonth) return;
 
     setIssueListLoading(true);
     setIssueListError(null);
@@ -128,10 +136,7 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ month: targetMonth });
       const res = await fetch(`/api/issues?${params.toString()}`, {
-        headers: {
-          "X-Redmine-Url": redmineUrl,
-          "X-Redmine-Api-Key": apiKey,
-        },
+        headers: redmineHeaders(),
       });
       const body = await res.json();
 
@@ -152,7 +157,7 @@ export default function Home() {
   }
 
   async function handleExportDocxZip() {
-    if (!redmineUrl || !apiKey || !targetMonth) return;
+    if (!canFetch || !targetMonth) return;
 
     setDocxExportLoading(true);
     setDocxExportError(null);
@@ -161,10 +166,7 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ month: targetMonth });
       const res = await fetch(`/api/export-docx?${params.toString()}`, {
-        headers: {
-          "X-Redmine-Url": redmineUrl,
-          "X-Redmine-Api-Key": apiKey,
-        },
+        headers: redmineHeaders(),
       });
 
       if (!res.ok) {
@@ -209,7 +211,7 @@ export default function Home() {
   }
 
   async function handleExportMarkdown() {
-    if (!redmineUrl || !apiKey || !targetMonth) return;
+    if (!canFetch || !targetMonth) return;
 
     setExportLoading(true);
     setExportError(null);
@@ -220,10 +222,7 @@ export default function Home() {
         closed_only: closedOnly ? "1" : "0",
       });
       const res = await fetch(`/api/export?${params.toString()}`, {
-        headers: {
-          "X-Redmine-Url": redmineUrl,
-          "X-Redmine-Api-Key": apiKey,
-        },
+        headers: redmineHeaders(),
       });
 
       if (!res.ok) {
@@ -256,10 +255,7 @@ export default function Home() {
 
     try {
       const res = await fetch(`/api/issue/${id}`, {
-        headers: {
-          "X-Redmine-Url": redmineUrl,
-          "X-Redmine-Api-Key": apiKey,
-        },
+        headers: redmineHeaders(),
       });
       const body = await res.json();
 
@@ -297,19 +293,33 @@ export default function Home() {
             value={redmineUrl}
             onChange={(e) => setRedmineUrl(e.target.value)}
             placeholder="Redmine URL（例: https://my.redmine.jp/xxxxx）"
-            className="rounded border border-black/[.15] bg-white px-3 py-2 text-black dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
+            disabled={useSample}
+            className="rounded border border-black/[.15] bg-white px-3 py-2 text-black disabled:opacity-50 dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
           />
           <input
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="APIキー"
+            disabled={useSample}
             autoComplete="off"
-            className="rounded border border-black/[.15] bg-white px-3 py-2 text-black dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
+            className="rounded border border-black/[.15] bg-white px-3 py-2 text-black disabled:opacity-50 dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
           />
           <p className="text-xs text-zinc-500">
             入力値はこの画面を離れる（再読み込み・タブを閉じる）と消えます。保存はされません。
           </p>
+          <label className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <input
+              type="checkbox"
+              checked={useSample}
+              onChange={(e) => {
+                setUseSample(e.target.checked);
+                setIssueList(null);
+                setDocxExportResult(null);
+              }}
+            />
+            サンプルデータを使う（開発用。Redmine に接続せず、今月・先月・先々月の架空のチケットを表示します）
+          </label>
         </div>
 
         <div className="flex flex-col gap-3 border-t border-black/[.1] pt-6 dark:border-white/[.15]">
@@ -327,7 +337,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={handleFetchIssueList}
-                disabled={issueListLoading || !redmineUrl || !apiKey || !targetMonth}
+                disabled={issueListLoading || !canFetch || !targetMonth}
                 className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
               >
                 {issueListLoading ? "取得中..." : "一覧を取得"}
@@ -335,7 +345,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={handleExportDocxZip}
-                disabled={docxExportLoading || !redmineUrl || !apiKey || !targetMonth}
+                disabled={docxExportLoading || !canFetch || !targetMonth}
                 className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
               >
                 {docxExportLoading ? "エクスポート中..." : "クローズ済みをdocx(Zip)でエクスポート"}
@@ -343,7 +353,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={handleExportMarkdown}
-                disabled={exportLoading || !redmineUrl || !apiKey || !targetMonth}
+                disabled={exportLoading || !canFetch || !targetMonth}
                 className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
               >
                 {exportLoading ? "エクスポート中..." : "MDでエクスポート"}
@@ -363,7 +373,7 @@ export default function Home() {
             一覧は、対象月に作成または更新されたチケットを全ステータス表示します。docx(Zip)エクスポートはそのうちクローズ済みのチケットのみを、チケットごとの docx と添付ファイルにまとめます。
           </p>
 
-          {(!redmineUrl || !apiKey) && (
+          {!canFetch && (
             <p className="text-xs text-zinc-500">
               上のRedmine URLとAPIキーを入力すると一覧を取得できます。
             </p>

@@ -3,6 +3,13 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import {
+  SAMPLE_BROKEN_ISSUE_IDS,
+  sampleAttachmentData,
+  sampleIssue,
+  sampleIssueList,
+  sampleStatuses,
+} from "@/lib/sample-data";
 
 /**
  * Redmine REST API クライアント。
@@ -109,6 +116,8 @@ export class RedmineApiError extends Error {
 export interface RedmineConnection {
   redmineUrl: string;
   apiKey: string;
+  /** true の場合、Redmine に接続せず開発用のサンプルデータ（lib/sample-data.ts）を返す。 */
+  sample?: boolean;
 }
 
 /** 入力された Redmine URL がプロトコル/接続先として不正な場合のエラー。クライアント起因なので 400 として扱う。 */
@@ -261,9 +270,18 @@ function assertOk(res: PinnedResponse): void {
 /** チケット1件を取得する。既定では journals を含める。 */
 export async function getIssue(
   id: string,
-  { redmineUrl, apiKey }: RedmineConnection,
+  { redmineUrl, apiKey, sample }: RedmineConnection,
   opts?: { include?: ("journals" | "attachments")[] },
 ): Promise<RedmineIssueResponse> {
+  if (sample) {
+    if (SAMPLE_BROKEN_ISSUE_IDS.has(Number(id))) {
+      throw new RedmineApiError(500, "サンプル: 詳細の取得に失敗するチケット");
+    }
+    const issue = sampleIssue(Number(id), opts?.include ?? ["journals"]);
+    if (!issue) throw new RedmineApiError(404, "サンプル: チケットが見つかりません");
+    return { issue };
+  }
+
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
   const include = (opts?.include ?? ["journals"]).join(",");
   const target = new URL(
@@ -289,7 +307,10 @@ export interface RedmineIssueStatus {
 export async function getIssueStatuses({
   redmineUrl,
   apiKey,
+  sample,
 }: RedmineConnection): Promise<RedmineIssueStatus[]> {
+  if (sample) return sampleStatuses();
+
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
   const target = new URL(`${redmineBase(parsed)}/issue_statuses.json`);
 
@@ -320,9 +341,18 @@ export const DEFAULT_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
  */
 export async function downloadAttachment(
   attachmentId: number,
-  { redmineUrl, apiKey }: RedmineConnection,
+  { redmineUrl, apiKey, sample }: RedmineConnection,
   opts?: { maxBytes?: number },
 ): Promise<Buffer> {
+  if (sample) {
+    const data = sampleAttachmentData(attachmentId);
+    if (!data) throw new RedmineApiError(404, "サンプル: 添付ファイルが見つかりません");
+    if (data.length > (opts?.maxBytes ?? DEFAULT_MAX_ATTACHMENT_BYTES)) {
+      throw new Error("Redmine からの応答が大きすぎます");
+    }
+    return data;
+  }
+
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
   const target = new URL(
     `${redmineBase(parsed)}/attachments/download/${encodeURIComponent(String(attachmentId))}`,
@@ -351,8 +381,12 @@ const DEFAULT_ISSUE_LIST_STATUS = "*";
 
 /** チケット一覧を取得する。 */
 export async function getIssues(
-  { redmineUrl, apiKey }: RedmineConnection,
-  {
+  { redmineUrl, apiKey, sample }: RedmineConnection,
+  params: RedmineIssueListParams = {},
+): Promise<RedmineIssueListResponse> {
+  if (sample) return sampleIssueList(params);
+
+  const {
     limit,
     offset,
     projectId,
@@ -363,8 +397,7 @@ export async function getIssues(
     updatedOnFrom,
     updatedOnTo,
     closedOnly,
-  }: RedmineIssueListParams = {},
-): Promise<RedmineIssueListResponse> {
+  } = params;
   const { parsed, address } = await assertSafeRedmineUrl(redmineUrl);
   const target = new URL(`${redmineBase(parsed)}/issues.json`);
 

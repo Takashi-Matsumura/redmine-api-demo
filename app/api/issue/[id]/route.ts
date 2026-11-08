@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getIssue } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
+import { readConnection } from "@/lib/connection";
 
 export async function GET(
   req: NextRequest,
@@ -15,18 +16,11 @@ export async function GET(
     );
   }
 
-  const redmineUrl = req.headers.get("x-redmine-url")?.trim();
-  const apiKey = req.headers.get("x-redmine-api-key")?.trim();
-
-  if (!redmineUrl || !apiKey) {
-    return Response.json(
-      { error: "Redmine URLとAPIキーを入力してください" },
-      { status: 400 },
-    );
-  }
+  const conn = readConnection(req);
+  if (conn instanceof Response) return conn;
 
   try {
-    const result = await getIssue(id, { redmineUrl, apiKey });
+    const result = await getIssue(id, conn);
     return Response.json(result);
   } catch (err) {
     return redmineErrorResponse(err, "Redmine issue fetch failed", {

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getAllIssues, getIssuesDetailed } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
+import { readConnection } from "@/lib/connection";
 import { monthToDateRange } from "@/lib/month";
 import { issuesToMarkdown } from "@/lib/markdown";
 
@@ -8,15 +9,8 @@ import { issuesToMarkdown } from "@/lib/markdown";
 export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
-  const redmineUrl = req.headers.get("x-redmine-url")?.trim();
-  const apiKey = req.headers.get("x-redmine-api-key")?.trim();
-
-  if (!redmineUrl || !apiKey) {
-    return Response.json(
-      { error: "Redmine URLとAPIキーを入力してください" },
-      { status: 400 },
-    );
-  }
+  const conn = readConnection(req);
+  if (conn instanceof Response) return conn;
 
   const month = req.nextUrl.searchParams.get("month") ?? "";
   if (!/^\d{4}-\d{2}$/.test(month)) {
@@ -35,7 +29,6 @@ export async function GET(req: NextRequest) {
   }
 
   const closedOnly = req.nextUrl.searchParams.get("closed_only") === "1";
-  const conn = { redmineUrl, apiKey };
 
   try {
     const { issues: summaries, totalCount, truncated } = await getAllIssues(
@@ -56,7 +49,7 @@ export async function GET(req: NextRequest) {
     }
 
     const markdown = issuesToMarkdown(issues, {
-      redmineBaseUrl: redmineUrl,
+      redmineBaseUrl: conn.redmineUrl,
       month,
       from: range.from,
       to: range.to,
