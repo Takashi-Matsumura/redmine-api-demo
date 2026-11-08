@@ -92,6 +92,8 @@ redmine-2026-08.zip
 ## 構成
 
 - `app/page.tsx`: 確認用画面（Client Component）。入力フォーム・一覧表示（ページネーション）・詳細ダイアログ・エクスポートボタン
+- `app/usage-guide.tsx`: 画面右側に表示する使い方の説明
+- `app/aqua-button.tsx`: Aqua 風のボタン部品（見た目は `app/globals.css` の `.aqua-btn`）
 - `app/api/issues/route.ts`: Route Handler。`month=YYYY-MM` で、その月に作成または更新されたチケットを全件返す。各チケットにクローズ済みかどうか（`is_closed`）を付ける
 - `app/api/export-docx/route.ts`: Route Handler。対象月のチケットを、チケットごとの docx と添付ファイルにまとめた Zip として返す（`closed_only=1` でクローズ済みのみ）
 - `app/api/issue/[id]/route.ts`: Route Handler。チケット1件を journals 込みで取得する
