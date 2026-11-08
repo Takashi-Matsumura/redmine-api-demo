@@ -49,7 +49,7 @@ export function UsageGuide() {
       └─ 仕様書.pdf`}
           </pre>
           <ul className="flex list-disc flex-col gap-1 pl-5 text-zinc-600 dark:text-zinc-400">
-            <li>docx には基本情報・説明・添付ファイルの一覧・コメントが入ります。</li>
+            <li>docx には基本情報（最終クローズ日時・再開の検知を含む）・説明・添付ファイルの一覧・ステータス変更履歴・コメントが入ります。</li>
             <li>件名は50文字まで。ファイル名に使えない文字は「_」に置き換え、同じ名前の添付には「(2)」などの番号を付けます。</li>
             <li>添付は1件100MB・全体で1GB・5000件まで。取得できなかった添付は、docx の添付一覧に理由を記載します。</li>
           </ul>
@@ -57,7 +57,7 @@ export function UsageGuide() {
         <div className="flex flex-col gap-2">
           <h4 className="font-medium">MD出力</h4>
           <p>
-            対象のチケットを1つの Markdown ファイル（<code className="text-xs">redmine-2026-10.md</code>）にまとめます。GitHub Copilot などに読み込ませる用途を想定しています。
+            対象のチケットを1つの Markdown ファイル（<code className="text-xs">redmine-2026-10.md</code>）にまとめます。各チケットに最終クローズ日時・再開の検知・ステータス変更履歴も記載します。GitHub Copilot などに読み込ませる用途を想定しています。
           </p>
         </div>
         <p className="text-zinc-600 dark:text-zinc-400">

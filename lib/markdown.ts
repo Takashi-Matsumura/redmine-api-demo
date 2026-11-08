@@ -1,4 +1,5 @@
 import type { RedmineIssue } from "@/lib/redmine";
+import { reopenSummaryText, statusChangeText, type ReopenAnalysis } from "@/lib/reopen";
 
 export interface ExportMeta {
   redmineBaseUrl: string;
@@ -38,7 +39,11 @@ function formatIssueUrl(baseUrl: string, id: number): string {
   return `${baseUrl.replace(/\/+$/, "")}/issues/${id}`;
 }
 
-function issueToMarkdown(issue: RedmineIssue, baseUrl: string): string {
+function issueToMarkdown(
+  issue: RedmineIssue,
+  baseUrl: string,
+  reopen: ReopenAnalysis | undefined,
+): string {
   const lines: string[] = [];
   lines.push(`## #${issue.id} ${issue.subject}`);
   lines.push("");
@@ -49,10 +54,22 @@ function issueToMarkdown(issue: RedmineIssue, baseUrl: string): string {
   lines.push(
     `- 起票: ${issue.author.name}（${issue.created_on}） / 担当: ${issue.assigned_to?.name ?? "未割当"} / 最終更新: ${issue.updated_on}`,
   );
+  lines.push(
+    `- 最終クローズ: ${issue.closed_on ?? "なし"} / 再開の検知: ${reopen ? reopenSummaryText(reopen) : "判定不可"}`,
+  );
   lines.push("");
   lines.push("### 説明");
   lines.push("");
   lines.push(issue.description ? sanitizeBody(issue.description) : "(なし)");
+
+  if (reopen && reopen.status_changes.length > 0) {
+    lines.push("");
+    lines.push(`### ステータス変更履歴（${reopen.status_changes.length}件）`);
+    lines.push("");
+    for (const c of reopen.status_changes) {
+      lines.push(`- ${c.created_on} ${c.user?.name ?? "unknown"}: ${statusChangeText(c)}`);
+    }
+  }
 
   const notes = (issue.journals ?? []).filter(
     (j) => j.notes && !j.private_notes,
@@ -72,7 +89,14 @@ function issueToMarkdown(issue: RedmineIssue, baseUrl: string): string {
 export function issuesToMarkdown(
   issues: RedmineIssue[],
   meta: ExportMeta,
+  /** チケットID → 再開の検知結果。無いチケットは「判定不可」と出力する。 */
+  reopenById: Map<number, ReopenAnalysis> = new Map(),
 ): string {
+  const reopens = issues.map((i) => reopenById.get(i.id));
+  const reopenedCount = reopens.filter((r) => r?.signal === "reopened").length;
+  const updatedAfterCloseCount = reopens.filter((r) => r?.signal === "updated_after_close").length;
+  const reopenedEverCount = reopens.filter((r) => (r?.reopen_count ?? 0) > 0).length;
+
   const filterDesc = `created_on or updated_on ${meta.from}..${meta.to}${meta.closedOnly ? " / status:closed" : ""}`;
 
   const frontMatter = [
@@ -84,6 +108,9 @@ export function issuesToMarkdown(
     `issue_count: ${issues.length}`,
     `excluded_private_notes: ${meta.excludedPrivateNotes}`,
     `failed_issue_count: ${meta.failures.length}`,
+    `reopened_issue_count: ${reopenedCount}`,
+    `updated_after_close_issue_count: ${updatedAfterCloseCount}`,
+    `reopened_ever_issue_count: ${reopenedEverCount}`,
     ...(meta.truncated
       ? [
           `truncated: true`,
@@ -97,7 +124,7 @@ export function issuesToMarkdown(
 
   const heading = `# Redmine ナレッジ ${meta.month}（${meta.closedOnly ? "完了" : "対象"}チケット ${issues.length}件）`;
 
-  const body = issues.map((issue) => issueToMarkdown(issue, meta.redmineBaseUrl));
+  const body = issues.map((issue, i) => issueToMarkdown(issue, meta.redmineBaseUrl, reopens[i]));
 
   const sections = [frontMatter, heading, "", body.join("\n\n---\n\n")];
 

@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
-import { getIssuesCreatedOrUpdated, getIssuesDetailed } from "@/lib/redmine";
+import { getIssueStatuses, getIssuesCreatedOrUpdated, getIssuesDetailed } from "@/lib/redmine";
 import { redmineErrorResponse } from "@/lib/redmine-response";
 import { readConnection } from "@/lib/connection";
 import { monthToDateRange } from "@/lib/month";
 import { issuesToMarkdown } from "@/lib/markdown";
+import { analyzeReopenForExport } from "@/lib/reopen";
 
 // 数百件規模の詳細取得（N+1）でも既定のタイムアウトに触れないようにする。
 export const maxDuration = 300;
@@ -38,9 +39,16 @@ export async function GET(req: NextRequest) {
       { closedOnly },
     );
 
-    const { issues, failures } = await getIssuesDetailed(
-      conn,
-      summaries.map((s) => s.id),
+    const [{ issues, failures }, statuses] = await Promise.all([
+      getIssuesDetailed(conn, summaries.map((s) => s.id)),
+      // 再開の検知の補助にのみ使うため、取得できなくても出力は続ける
+      getIssueStatuses(conn).catch((err) => {
+        console.error("Redmine issue status fetch failed:", err);
+        return null;
+      }),
+    ]);
+    const reopenById = new Map(
+      issues.map((issue) => [issue.id, analyzeReopenForExport(issue, statuses)]),
     );
 
     let excludedPrivateNotes = 0;
@@ -60,7 +68,7 @@ export async function GET(req: NextRequest) {
       failures,
       truncated: truncated ? { fetchedCount: summaries.length } : undefined,
       exportedAt: new Date().toISOString(),
-    });
+    }, reopenById);
 
     return new Response(markdown, {
       headers: {
