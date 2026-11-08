@@ -24,3 +24,152 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ------------------------------------------------------------------
+ * Aqua 風ボタン（app/aqua-button.tsx）
+ * ジェル状のグラデーションと、上半分の光沢（::before）で表現する。
+ * ------------------------------------------------------------------ */
+.aqua-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2rem;
+  padding: 0 1rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  isolation: isolate;
+  transition: filter 120ms ease, box-shadow 120ms ease;
+}
+
+.aqua-btn::before {
+  /* 上半分の光沢 */
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 0.5rem;
+  right: 0.5rem;
+  height: 48%;
+  border-radius: 9999px 9999px 0.75rem 0.75rem / 9999px 9999px 0.5rem 0.5rem;
+  background: linear-gradient(to bottom, rgb(255 255 255 / 0.85), rgb(255 255 255 / 0.15));
+  pointer-events: none;
+  z-index: -1;
+}
+
+.aqua-btn__icon {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+}
+
+.aqua-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgb(59 153 252 / 0.55),
+    0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+.aqua-btn:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+
+.aqua-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* 青いジェル（主な操作） */
+.aqua-btn--primary {
+  color: #fff;
+  font-weight: 600;
+  text-shadow: 0 -1px 0 rgb(0 40 110 / 0.45);
+  border: 1px solid #1f62b8;
+  background: linear-gradient(
+    to bottom,
+    #8cc4ff 0%,
+    #4a9ff5 48%,
+    #2b84ea 52%,
+    #5eb2ff 100%
+  );
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.3),
+    inset 0 -2px 4px rgb(160 220 255 / 0.6);
+}
+
+.aqua-btn--primary:not(:disabled):active {
+  filter: none;
+  background: linear-gradient(
+    to bottom,
+    #5fa6f0 0%,
+    #2a7fdb 48%,
+    #156ccc 52%,
+    #3f94ea 100%
+  );
+}
+
+/* 白いジェル */
+.aqua-btn--secondary {
+  color: #1d1d1f;
+  border: 1px solid #9c9c9c;
+  background: linear-gradient(
+    to bottom,
+    #ffffff 0%,
+    #f1f1f1 48%,
+    #e1e1e1 52%,
+    #f7f7f7 100%
+  );
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.2),
+    inset 0 -2px 3px rgb(255 255 255 / 0.9);
+}
+
+.aqua-btn--secondary:not(:disabled):active {
+  filter: none;
+  background: linear-gradient(
+    to bottom,
+    #e2e2e2 0%,
+    #d3d3d3 48%,
+    #c4c4c4 52%,
+    #dadada 100%
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  .aqua-btn::before {
+    background: linear-gradient(to bottom, rgb(255 255 255 / 0.45), rgb(255 255 255 / 0.05));
+  }
+
+  .aqua-btn--primary {
+    border-color: #0d3f80;
+  }
+
+  /* グラファイト調 */
+  .aqua-btn--secondary {
+    color: #f5f5f7;
+    text-shadow: 0 -1px 0 rgb(0 0 0 / 0.5);
+    border-color: #1a1a1a;
+    background: linear-gradient(
+      to bottom,
+      #6e6e73 0%,
+      #4d4d52 48%,
+      #3a3a3e 52%,
+      #55555a 100%
+    );
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.5),
+      inset 0 -2px 3px rgb(255 255 255 / 0.12);
+  }
+
+  .aqua-btn--secondary:not(:disabled):active {
+    background: linear-gradient(
+      to bottom,
+      #545458 0%,
+      #3a3a3e 48%,
+      #2a2a2d 52%,
+      #404044 100%
+    );
+  }
+}

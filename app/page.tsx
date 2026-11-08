@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { RedmineIssue, RedmineIssueResponse } from "@/lib/redmine";
 import type { IssueListItem, IssueListResponse } from "@/lib/issue-list";
 import { currentMonthValue } from "@/lib/month";
+import { AquaButton, DocumentIcon, ListIcon, MarkdownIcon } from "./aqua-button";
 
 /** 一覧の各行に出す、クローズ済み／進行中の区別。 */
 function ClosedBadge({ isClosed }: { isClosed: IssueListItem["is_closed"] }) {
@@ -323,42 +324,49 @@ export default function Home() {
         </div>
 
         <div className="flex flex-col gap-3 border-t border-black/[.1] pt-6 dark:border-white/[.15]">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-medium text-black dark:text-zinc-50">
-              チケット一覧
-            </h2>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="month"
-                value={targetMonth}
-                onChange={(e) => setTargetMonth(e.target.value)}
-                className="rounded border border-black/[.15] bg-white px-2 py-1.5 text-sm text-black dark:border-white/[.2] dark:bg-zinc-900 dark:text-zinc-50"
-              />
-              <button
-                type="button"
-                onClick={handleFetchIssueList}
-                disabled={issueListLoading || !canFetch || !targetMonth}
-                className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
-              >
-                {issueListLoading ? "取得中..." : "一覧を取得"}
-              </button>
-              <button
-                type="button"
-                onClick={handleExportDocxZip}
-                disabled={docxExportLoading || !canFetch || !targetMonth}
-                className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
-              >
-                {docxExportLoading ? "エクスポート中..." : "クローズ済みをdocx(Zip)でエクスポート"}
-              </button>
-              <button
-                type="button"
-                onClick={handleExportMarkdown}
-                disabled={exportLoading || !canFetch || !targetMonth}
-                className="rounded border border-black/[.15] px-3 py-1.5 text-sm text-black disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50"
-              >
-                {exportLoading ? "エクスポート中..." : "MDでエクスポート"}
-              </button>
-            </div>
+          <h2 className="text-sm font-medium text-black dark:text-zinc-50">
+            チケット一覧
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="month"
+              value={targetMonth}
+              onChange={(e) => setTargetMonth(e.target.value)}
+              aria-label="対象月"
+              className="h-8 rounded-md border border-black/[.25] bg-white px-2 text-sm text-black shadow-[inset_0_1px_2px_rgb(0_0_0/0.15)] dark:border-white/[.25] dark:bg-zinc-900 dark:text-zinc-50"
+            />
+            <AquaButton
+              variant="primary"
+              icon={<ListIcon />}
+              onClick={handleFetchIssueList}
+              disabled={!canFetch || !targetMonth}
+              loading={issueListLoading}
+              loadingLabel="取得中…"
+              title="対象月に作成・更新されたチケットを一覧表示します"
+            >
+              一覧取得
+            </AquaButton>
+            <span className="mx-1 hidden h-5 w-px bg-black/[.15] sm:block dark:bg-white/[.2]" aria-hidden="true" />
+            <AquaButton
+              icon={<DocumentIcon />}
+              onClick={handleExportDocxZip}
+              disabled={!canFetch || !targetMonth}
+              loading={docxExportLoading}
+              loadingLabel="出力中…"
+              title="クローズ済みのチケットを、チケットごとの docx と添付ファイルにまとめた Zip でダウンロードします"
+            >
+              docx出力
+            </AquaButton>
+            <AquaButton
+              icon={<MarkdownIcon />}
+              onClick={handleExportMarkdown}
+              disabled={!canFetch || !targetMonth}
+              loading={exportLoading}
+              loadingLabel="出力中…"
+              title="対象月に起票されたチケットを1つの Markdown ファイルでダウンロードします"
+            >
+              MD出力
+            </AquaButton>
           </div>
 
           <label className="flex items-center gap-2 text-sm text-black dark:text-zinc-50">
@@ -367,10 +375,10 @@ export default function Home() {
               checked={closedOnly}
               onChange={(e) => setClosedOnly(e.target.checked)}
             />
-            MDエクスポートは完了（クローズ）済みのみ（起票日が対象月のチケットが対象）
+            MD出力は完了（クローズ）済みのみ（起票日が対象月のチケットが対象）
           </label>
           <p className="text-xs text-zinc-500">
-            一覧は、対象月に作成または更新されたチケットを全ステータス表示します。docx(Zip)エクスポートはそのうちクローズ済みのチケットのみを、チケットごとの docx と添付ファイルにまとめます。
+            一覧は、対象月に作成または更新されたチケットを全ステータス表示します。「docx出力」はそのうちクローズ済みのチケットのみを、チケットごとの docx と添付ファイルにまとめた Zip でダウンロードします。
           </p>
 
           {!canFetch && (
@@ -477,7 +485,7 @@ export default function Home() {
             上のRedmine URLとAPIキーを実環境の値で入力する。
           </li>
           <li>
-            対象月を選び「一覧を取得」をクリックし、実際のRedmine画面で「作成日がその月」または「更新日がその月」のチケットと件数が一致するか確認する（Redmine画面では2つの条件で別々に絞り込み、重複を除いて合算する）。
+            対象月を選び「一覧取得」をクリックし、実際のRedmine画面で「作成日がその月」または「更新日がその月」のチケットと件数が一致するか確認する（Redmine画面では2つの条件で別々に絞り込み、重複を除いて合算する）。
           </li>
           <li>
             一覧の行をダブルクリックし、ダイアログに表示された詳細（ステータス・担当者・説明・journalsのnotes）が実際のRedmine画面と一致するか確認する。
@@ -495,13 +503,13 @@ export default function Home() {
             101件以上ある月で「次へ」「前へ」を操作し、ページが重複・欠落なく切り替わること（表示範囲の件数表示と実際の行数が一致すること）を確認する。
           </li>
           <li>
-            「クローズ済みをdocx(Zip)でエクスポート」で取得したZipを展開し、チケットIDのフォルダ数が一覧の「クローズ」件数と一致するか確認する。
+            「docx出力」で取得したZipを展開し、チケットIDのフォルダ数が一覧の「クローズ」件数と一致するか確認する。
           </li>
           <li>
             添付ファイルのあるチケットのフォルダを開き、添付ファイルが docx と同じ場所にすべて揃っていること、Word で docx を開いて内容（説明・コメント・添付一覧）が Redmine 画面と一致することを確認する。
           </li>
           <li>
-            「MDでエクスポート」でダウンロードしたファイルの front matter の issue_count が、同条件で一覧取得した total_count と一致するか確認する（101件以上ある月は特に）。
+            「MD出力」でダウンロードしたファイルの front matter の issue_count が、同条件で一覧取得した total_count と一致するか確認する（101件以上ある月は特に）。
           </li>
           <li>
             エクスポートしたファイルを開き、front matter・チケットの区切り・見出し階層が崩れていないこと、プライベート注記が本文に含まれていないことを確認する。
