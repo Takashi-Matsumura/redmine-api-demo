@@ -14,6 +14,7 @@ import { readConnection } from "@/lib/connection";
 import { monthToDateRange } from "@/lib/month";
 import { issueToDocx, type AttachmentEntry } from "@/lib/docx";
 import { sanitizeFileName, UniqueNamer } from "@/lib/filename";
+import { encodeCp932, toCp932Safe } from "@/lib/cp932";
 import { analyzeReopenForExport } from "@/lib/reopen";
 
 // 添付ファイルのダウンロードを含むため、既定のタイムアウトに触れないようにする。
@@ -34,6 +35,7 @@ function formatBytes(bytes: number): string {
 /**
  * 対象月に作成または更新されたチケットを、チケットごとの docx と添付ファイルにまとめた Zip で返す。
  * closed_only=1 の場合はクローズ済みのチケットのみを対象にする。
+ * encoding=utf8 の場合はファイル名を UTF-8（Mac 向け）で、それ以外は CP932（Windows 向け）で格納する。
  *
  * redmine-YYYY-MM.zip
  * └─ redmine-YYYY-MM/
@@ -57,6 +59,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const closedOnly = req.nextUrl.searchParams.get("closed_only") === "1";
+    // Windows の展開ツールの多くは UTF-8 フラグを無視して CP932 として読むため、既定は CP932 にする
+    const useCp932 = req.nextUrl.searchParams.get("encoding") !== "utf8";
+    /** Zip に入れるファイル名を、選んだ文字コードで表せる形にする。重複チェック（UniqueNamer）の前に通す。 */
+    const fitEncoding = (name: string) => (useCp932 ? toCp932Safe(name) : name);
     const { issues: summaries, truncated } = await getIssuesCreatedOrUpdated(
       conn,
       range,
@@ -100,11 +106,11 @@ export async function GET(req: NextRequest) {
       const folder = `${rootFolder}/${issue.id}`;
       const namer = new UniqueNamer();
       const docxName = namer.take(
-        `${sanitizeFileName(`${issue.id}_${issue.subject}`, {
+        `${fitEncoding(sanitizeFileName(`${issue.id}_${issue.subject}`, {
           maxLength: SUBJECT_MAX_LENGTH + String(issue.id).length + 1,
           keepExtension: false,
           fallback: String(issue.id),
-        })}.docx`,
+        }))}.docx`,
       );
 
       const entries: AttachmentEntry[] = [];
@@ -157,7 +163,9 @@ export async function GET(req: NextRequest) {
           // 確保した量のうち、実際に受信しなかった分を戻す
           reservedBytes -= allowance - data.length;
           const zipName = namer.take(
-            sanitizeFileName(attachment.filename, { fallback: `attachment-${attachment.id}` }),
+            fitEncoding(
+              sanitizeFileName(attachment.filename, { fallback: `attachment-${attachment.id}` }),
+            ),
           );
           zip.file(`${folder}/${zipName}`, data);
           entries.push({ attachment, zipName });
@@ -190,7 +198,14 @@ export async function GET(req: NextRequest) {
     );
 
     // docx・画像・Office ファイルの多くは既に圧縮済みのため、再圧縮せず格納のみ行う（大容量時の処理時間短縮）
-    const body = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
+    // CP932 の場合、JSZip は UTF-8 フラグを立てず、UTF-8 の名前を Unicode Path 拡張フィールドに併記する
+    // （7-Zip など拡張フィールドを読むツールでも正しく展開できる）
+    const body = await zip.generateAsync({
+      type: "uint8array",
+      compression: "STORE",
+      // JSZip の型に合わせ、バイト列を 1文字=1バイトの文字列（binary string）で渡す
+      ...(useCp932 ? { encodeFileName: (name: string) => String.fromCharCode(...encodeCp932(name)) } : {}),
+    });
 
     return new Response(body as Uint8Array<ArrayBuffer>, {
       headers: {

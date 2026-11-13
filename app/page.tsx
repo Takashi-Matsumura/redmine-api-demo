@@ -191,6 +191,7 @@ export default function Home() {
 
   const [targetMonth, setTargetMonth] = useState(currentMonthValue);
   const [closedOnly, setClosedOnly] = useState(true);
+  const [zipEncoding, setZipEncoding] = useState<"cp932" | "utf8">("cp932");
   const [issueList, setIssueList] = useState<IssueListResponse | null>(null);
   const [issueListMonth, setIssueListMonth] = useState<string | null>(null);
   const [page, setPage] = useState(0);
@@ -257,6 +258,7 @@ export default function Home() {
       const params = new URLSearchParams({
         month: targetMonth,
         closed_only: closedOnly ? "1" : "0",
+        encoding: zipEncoding,
       });
       const res = await fetch(`/api/export-docx?${params.toString()}`, {
         headers: redmineHeaders(),
@@ -484,6 +486,30 @@ export default function Home() {
             />
             出力はクローズ済みのチケットのみ（docx出力・MD出力共通）
           </label>
+          <div
+            role="radiogroup"
+            aria-label="Zipを展開するパソコン"
+            className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-black dark:text-zinc-50"
+          >
+            <span>Zipを展開するパソコン（docx出力）:</span>
+            {(
+              [
+                ["cp932", "Windows"],
+                ["utf8", "Mac"],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="zip-encoding"
+                  value={value}
+                  checked={zipEncoding === value}
+                  onChange={() => setZipEncoding(value)}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
           <p className="text-xs text-zinc-500">
             一覧は、対象月に作成または更新されたチケットを全ステータス表示します。docx出力・MD出力も同じ条件のチケットを対象とし、上のチェックがONならそのうちクローズ済みのチケットのみを出力します。
           </p>

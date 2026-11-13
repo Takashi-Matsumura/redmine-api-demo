@@ -54,7 +54,10 @@ export function UsageGuide() {
             <li>添付は1件100MB・全体で1GB・5000件まで。取得できなかった添付は、docx の添付一覧に理由を記載します。</li>
           </ul>
           <p className="text-xs text-zinc-500">
-            ※ Zip はエクスプローラー（Windows）や Finder（Mac）で展開してください。Mac のターミナルの{" "}
+            ※ 「Zipを展開するパソコン」は、Zip を展開するパソコンに合わせて選んでください。合っていないと、展開後のファイル名が文字化けしたり拡張子が消えたりします。Windows を選んだ場合、Shift_JIS で表せない文字（絵文字など）はファイル名では「_」に置き換えます。
+          </p>
+          <p className="text-xs text-zinc-500">
+            ※ Mac を選んだ場合は Finder で展開してください。Mac のターミナルの{" "}
             <code>unzip</code> コマンドは日本語のファイル名を扱えず、展開に失敗します。ターミナルで展開する場合は{" "}
             <code>ditto -x -k redmine-2026-10.zip 展開先</code> を使ってください。
           </p>
